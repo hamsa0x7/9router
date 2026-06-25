@@ -8,13 +8,13 @@ export const MITM_TOOLS = {
     description: "Google Antigravity IDE with MITM",
     configType: "mitm",
     mitmDomain: "daily-cloudcode-pa.googleapis.com",
-    modelAliases: ["gemini-3.5-flash-low", "gemini-3-flash-agent", "gemini-3.5-flash-extra-low", "gemini-3.1-pro-low", "gemini-pro-agent", "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-oss-120b-medium", "gemini-3-flash"],
+    modelAliases: ["gemini-3-flash-agent", "gemini-3.5-flash-low", "gemini-3.5-flash-extra-low", "gemini-3.1-pro-low", "gemini-pro-agent", "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-oss-120b-medium", "gemini-3-flash"],
     defaultModels: [
-      { id: "gemini-3.5-flash-low", name: "Gemini 3.5 Flash (Medium) / Default", alias: "gemini-3.5-flash-low" },
-      { id: "gemini-3-flash-agent", name: "Gemini 3.5 Flash (High)", alias: "gemini-3-flash-agent" },
+      { id: "gemini-3-flash-agent", name: "Gemini 3.5 Flash (High) / Default", alias: "gemini-3-flash-agent" },
+      { id: "gemini-3.5-flash-low", name: "Gemini 3.5 Flash (Medium)", alias: "gemini-3.5-flash-low", mandatory: true },
       { id: "gemini-3.5-flash-extra-low", name: "Gemini 3.5 Flash (Low)", alias: "gemini-3.5-flash-extra-low" },
-      { id: "gemini-3.1-pro-low", name: "Gemini 3.1 Pro (Low)", alias: "gemini-3.1-pro-low" },
       { id: "gemini-pro-agent", name: "Gemini 3.1 Pro (High)", alias: "gemini-pro-agent" },
+      { id: "gemini-3.1-pro-low", name: "Gemini 3.1 Pro (Low)", alias: "gemini-3.1-pro-low" },
       { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking)", alias: "claude-sonnet-4-6" },
       { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)", alias: "claude-opus-4-6-thinking" },
       { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)", alias: "gpt-oss-120b-medium" },
@@ -47,6 +47,22 @@ export const MITM_TOOLS = {
       { id: "gpt-4.1", name: "GPT-4.1", alias: "gpt-4.1" },
     ],
   },
+  letta: {
+    id: "letta",
+    name: "Letta Code",
+    image: "/providers/lettacode.png",
+    color: "#10A37F",
+    description: "Letta Code OpenAI API with MITM",
+    configType: "mitm",
+    mitmDomain: "api.openai.com",
+    modelAliases: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-5-mini", "claude-haiku-4.5"],
+    defaultModels: [
+      { id: "gpt-4o", name: "GPT-4o", alias: "gpt-4o" },
+      { id: "gpt-4.1", name: "GPT-4.1", alias: "gpt-4.1" },
+      { id: "gpt-4o-mini", name: "GPT-4o Mini", alias: "gpt-4o-mini" },
+      { id: "claude-haiku-4.5", name: "Claude Haiku 4.5", alias: "claude-haiku-4.5" },
+    ],
+  },
   kiro: {
     id: "kiro",
     name: "Kiro",
@@ -56,6 +72,12 @@ export const MITM_TOOLS = {
     configType: "mitm",
     mitmDomain: "q.us-east-1.amazonaws.com",
     defaultModels: [
+      // Kiro's agent mode sends modelId "auto" for the main turn and "simple-task"
+      // for background sub-tasks. Without a matching slot getMappedModel returns null
+      // and the turn is passed through to the Kiro upstream instead of the configured
+      // provider. Wire ids seen in MITM captures of /generateAssistantResponse
+      // (runtime.us-east-1.kiro.dev), 2026-06-02 and 2026-06-14.
+      { id: "auto", name: "Auto (Kiro Agent)", alias: "auto" },
       { id: "claude-sonnet-4.5", name: "Claude Sonnet 4.5", alias: "claude-sonnet-4.5" },
       { id: "claude-sonnet-4", name: "Claude Sonnet 4", alias: "claude-sonnet-4" },
       { id: "claude-haiku-4.5", name: "Claude Haiku 4.5", alias: "claude-haiku-4.5" },
@@ -310,22 +332,23 @@ amp --model "{{model}}"
   },
   "deepseek-tui": {
     id: "deepseek-tui",
-    name: "DeepSeek TUI",
-    image: "/providers/deepseek-tui.png",
+    name: "CodeWhale",
+    image: "/providers/codewhale.png",
     color: "#4D6BFE",
-    description: "DeepSeek Terminal Coding Agent (Rust TUI)",
-    docsUrl: "https://github.com/DeepSeek-TUI/DeepSeek-TUI",
+    description: "CodeWhale terminal coding agent with multi-provider support",
+    docsUrl: "https://github.com/Hmbown/CodeWhale",
     configType: "custom",
-    defaultCommand: "deepseek",
-    modelAliases: ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"],
+    defaultCommand: "codewhale",
+    modelAliases: ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner", "gpt-4.1", "glm-5"],
     defaultModels: [
       { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", alias: "deepseek-v4-pro" },
       { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", alias: "deepseek-v4-flash" },
       { id: "deepseek-chat", name: "DeepSeek V3 Chat", alias: "deepseek-chat" },
+      { id: "gpt-4.1", name: "GPT-4.1", alias: "gpt-4.1" },
     ],
     notes: [
-      { type: "info", text: "DeepSeek TUI uses ~/.deepseek/config.toml for configuration. 9Router will update the provider to 'openai' mode with your base_url, api_key, and model." },
-      { type: "warning", text: "Config path: Linux/macOS ~/.deepseek/config.toml • Windows %USERPROFILE%\\.deepseek\\config.toml" },
+      { type: "info", text: "CodeWhale uses ~/.codewhale/config.toml. 9Router seeds the OpenAI provider entry so you can point CodeWhale at 9Router and still switch to its other providers later." },
+      { type: "warning", text: "Config path: Linux/macOS ~/.codewhale/config.toml • Windows %USERPROFILE%\\.codewhale\\config.toml" },
     ],
   },
   jcode: {
@@ -357,23 +380,91 @@ amp --model "{{model}}"
       { id: "gemini-3.1-pro", name: "Gemini 3.1 Pro", alias: "gemini", defaultValue: "gemini/gemini-3.1-pro" },
     ],
   },
-  // HIDDEN: gemini-cli
-  // "gemini-cli": {
-  //   id: "gemini-cli",
-  //   name: "Gemini CLI",
-  //   icon: "terminal",
-  //   color: "#4285F4",
-  //   description: "Google Gemini CLI",
-  //   configType: "env",
-  //   envVars: {
-  //     baseUrl: "GEMINI_API_BASE_URL",
-  //     model: "GEMINI_MODEL",
-  //   },
-  //   defaultModels: [
-  //     { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", alias: "pro" },
-  //     { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", alias: "flash" },
-  //   ],
-  // },
+  omp: {
+    id: "omp",
+    name: "Oh My Pi",
+    image: "/providers/omp.png",
+    color: "#111111",
+    description: "Oh My Pi terminal coding agent via 9Router",
+    configType: "custom",
+    defaultCommand: "omp",
+    notes: [
+      { type: "info", text: "Oh My Pi reads custom OpenAI-compatible providers from ~/.omp/agent/models.yml. 9Router adds itself as a provider with auto-discovery — models appear automatically in omp's /model menu." },
+      { type: "warning", text: "Config path: Linux/macOS ~/.omp/agent/models.yml • Windows %USERPROFILE%\\.omp\\agent\\models.yml" },
+    ],
+  },
+  pi: {
+    id: "pi",
+    name: "Pi",
+    image: "/providers/pi.svg",
+    color: "#111111",
+    description: "Pi terminal coding harness via 9Router",
+    docsUrl: "https://pi.dev",
+    configType: "custom",
+    defaultCommand: "pi",
+    notes: [
+      { type: "info", text: "Pi reads custom OpenAI-compatible providers from ~/.pi/agent/models.json. Add 9Router there, then select the 9Router model from Pi's /model menu." },
+      { type: "warning", text: "Config path: Linux/macOS ~/.pi/agent/models.json • Windows %USERPROFILE%\\.pi\\agent\\models.json" },
+    ],
+    guideSteps: [
+      { step: 1, title: "Install Pi", desc: "npm install -g @earendil-works/pi-coding-agent" },
+      { step: 2, title: "API Key", type: "apiKeySelector" },
+      { step: 3, title: "Base URL", value: "{{baseUrl}}", copyable: true },
+      { step: 4, title: "Select Model", type: "modelSelector" },
+      { step: 5, title: "Save Config", desc: "Copy the JSON below to ~/.pi/agent/models.json, then run pi and choose the model with /model." },
+    ],
+    codeBlock: {
+      language: "json",
+      code: `{
+  "providers": {
+    "9router": {
+      "baseUrl": "{{baseUrl}}",
+      "api": "openai-completions",
+      "apiKey": "{{apiKey}}",
+      "authHeader": true,
+      "models": [
+        {
+          "id": "{{model}}",
+          "name": "{{model}} via 9Router",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "contextWindow": 200000,
+          "maxTokens": 32000
+        }
+      ]
+    }
+  }
+}`,
+    },
+  },
+  letta: {
+    id: "letta",
+    name: "Letta Cli",
+    image: "/providers/letta.png",
+    color: "#FF6B35",
+    description: "Letta CLI — AI agent with persistent memory and tool use",
+    configType: "custom",
+    docsUrl: "https://docs.letta.com",
+    notes: [
+      {
+        type: "info",
+        text: "Letta CLI uses pi-ai which sends OpenAI-compatible requests. 9Router configures it as an OpenAI provider with custom base URL."
+      },
+      {
+        type: "info",
+        text: "CLI (Local Mode): 9Router auto-configures ~/.letta/lc-local-backend/providers/auth.json. Use 'letta --info' to check if local mode is enabled."
+      },
+      {
+        type: "info",
+        text: "Desktop App: Use the /connect command in Letta's TUI: '/connect openai --base-url <9router>/v1 --api-key <key>' then select models."
+      },
+      {
+        type: "warning",
+        text: "Local mode config path: ~/.letta/lc-local-backend/providers/auth.json (CLI only)"
+      },
+    ],
+  },
+
 };
 
 // Get all provider models for mapping dropdown
@@ -391,4 +482,3 @@ export const getProviderModelsForMapping = (providers) => {
   });
   return result;
 };
-

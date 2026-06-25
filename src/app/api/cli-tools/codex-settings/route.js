@@ -94,11 +94,28 @@ export async function GET() {
 
     const config = await readConfig();
 
+    // Read codex_bridge_mode
+    let codexBridgeMode = "sandbox"; // default
+    try {
+      const modePath = path.join(process.cwd(), "open-sse/config/codex_bridge_mode");
+      codexBridgeMode = await fs.readFile(modePath, "utf-8");
+      codexBridgeMode = codexBridgeMode.trim();
+    } catch {
+      // Fallback to older disable_local_exec flag check
+      try {
+        await fs.access(path.join(process.cwd(), "open-sse/config/disable_local_exec"));
+        codexBridgeMode = "proxy";
+      } catch {
+        codexBridgeMode = "sandbox";
+      }
+    }
+
     return NextResponse.json({
       installed: true,
       config,
       has9Router: has9RouterConfig(config),
       configPath: getCodexConfigPath(),
+      codexBridgeMode
     });
   } catch (error) {
     console.log("Error checking codex settings:", error);
@@ -109,7 +126,7 @@ export async function GET() {
 // POST - Update 9Router settings (merge with existing config)
 export async function POST(request) {
   try {
-    const { baseUrl, apiKey, model, subagentModel } = await request.json();
+    const { baseUrl, apiKey, model, subagentModel, localExecutionEnabled } = await request.json();
     
     if (!baseUrl || !apiKey || !model) {
       return NextResponse.json({ error: "baseUrl, apiKey and model are required" }, { status: 400 });
@@ -144,6 +161,7 @@ export async function POST(request) {
     // Add subagent configuration
     const effectiveSubagentModel = subagentModel || model;
     setNestedSection(parsed, "agents.subagent", {
+      description: "Fast subagent for delegated Codex tasks",
       model: effectiveSubagentModel,
     });
 
@@ -163,6 +181,16 @@ export async function POST(request) {
     authData.OPENAI_API_KEY = apiKey;
     authData.auth_mode = "apikey";
     await fs.writeFile(authPath, JSON.stringify(authData, null, 2));
+
+    // Handle 3-way mode toggle
+    const modePath = path.join(process.cwd(), "open-sse/config/codex_bridge_mode");
+    await fs.mkdir(path.dirname(modePath), { recursive: true });
+    await fs.writeFile(modePath, codexBridgeMode);
+    
+    // Clean up old flag file if exists
+    try {
+      await fs.unlink(path.join(process.cwd(), "open-sse/config/disable_local_exec"));
+    } catch(err) {}
 
     return NextResponse.json({
       success: true,

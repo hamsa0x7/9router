@@ -21,12 +21,10 @@ const getConfigPath = () => {
 const readConfig = async () => {
   try {
     const content = await fs.readFile(getConfigPath(), "utf-8");
-    // Tolerate JSONC (trailing commas) and treat unparseable files as "no config"
-    // rather than throwing a 500 that the UI misreads as "tool not installed".
-    const stripped = content.replace(/,(\s*[}\]])/g, "$1");
-    return JSON.parse(stripped);
+    return JSON.parse(content);
   } catch (error) {
-    return null;
+    if (error.code === "ENOENT") return null;
+    throw error;
   }
 };
 

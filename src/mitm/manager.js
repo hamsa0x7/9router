@@ -99,6 +99,21 @@ const ENCRYPT_SALT = "9router-mitm-pwd";
 function getProcessUsingPort443() {
   try {
     if (IS_WIN) {
+      try {
+        const netstat = execSync(`netstat -ano | findstr :443`, { encoding: "utf8", windowsHide: true }).trim();
+        const lines = netstat.split('\n').filter(l => l.includes('LISTENING'));
+        if (lines.length > 0) {
+          const pid = parseInt(lines[0].trim().split(/\s+/).pop(), 10);
+          if (pid && pid > 4) {
+            const tasklistResult = execSync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, { encoding: "utf8", windowsHide: true });
+            const processMatch = tasklistResult.match(/"([^"]+)"/);
+            if (processMatch) return processMatch[1].replace(".exe", "");
+          }
+        }
+      } catch (e) {
+        // Fallback to powershell
+      }
+      
       const psCmd = `powershell -NonInteractive -WindowStyle Hidden -Command ` +
         `"$c = Get-NetTCPConnection -LocalPort 443 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if ($c) { $c.OwningProcess } else { 0 }"`;
       const pidStr = execSync(psCmd, { encoding: "utf8", windowsHide: true }).trim();
@@ -285,16 +300,33 @@ function checkPort443Free() {
 function getPort443Owner(sudoPassword) {
   return new Promise((resolve) => {
     if (IS_WIN) {
-      const psCmd = `powershell -NonInteractive -WindowStyle Hidden -Command "` +
-        `$c = Get-NetTCPConnection -LocalPort 443 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; ` +
-        `if ($c) { $c.OwningProcess } else { 0 }"`;    
-      exec(psCmd, { windowsHide: true }, (err, stdout) => {
-        if (err) return resolve(null);
-        const pid = parseInt(stdout.trim(), 10);
-        if (!pid || pid <= 4) return resolve(null);
-        exec(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, { windowsHide: true }, (e2, out2) => {
-          const m = out2?.match(/"([^"]+)"/);
-          resolve({ pid, name: m ? m[1] : "unknown" });
+      exec(`netstat -ano | findstr :443`, { windowsHide: true }, (err, stdout) => {
+        if (!err && stdout) {
+          const lines = stdout.trim().split('\n').filter(l => l.includes('LISTENING'));
+          if (lines.length > 0) {
+            const pid = parseInt(lines[0].trim().split(/\s+/).pop(), 10);
+            if (pid && pid > 4) {
+              exec(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, { windowsHide: true }, (e2, out2) => {
+                const m = out2?.match(/"([^"]+)"/);
+                resolve({ pid, name: m ? m[1].replace(".exe", "") : "unknown" });
+              });
+              return;
+            }
+          }
+        }
+        
+        // Fallback to powershell
+        const psCmd = `powershell -NonInteractive -WindowStyle Hidden -Command "` +
+          `$c = Get-NetTCPConnection -LocalPort 443 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; ` +
+          `if ($c) { $c.OwningProcess } else { 0 }"`;    
+        exec(psCmd, { windowsHide: true }, (err, stdout) => {
+          if (err) return resolve(null);
+          const pid = parseInt(stdout.trim(), 10);
+          if (!pid || pid <= 4) return resolve(null);
+          exec(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, { windowsHide: true }, (e2, out2) => {
+            const m = out2?.match(/"([^"]+)"/);
+            resolve({ pid, name: m ? m[1] : "unknown" });
+          });
         });
       });
     } else {
@@ -398,6 +430,31 @@ async function getMitmStatus() {
   return { running, pid, certExists, certTrusted, dnsStatus };
 }
 
+function isAlreadyRunningRestartRecovery(error, status) {
+  return error?.message === "MITM server is already running" && status?.running === true;
+}
+
+async function recoverAlreadyRunningRestart(error, sudoPassword) {
+  let status = null;
+  try {
+    status = await getMitmStatus();
+  } catch {
+    return false;
+  }
+
+  if (!isAlreadyRunningRestartRecovery(error, status)) return false;
+
+  // Fixes #1462: a crashed child can schedule a restart while manager state
+  // still points at a live MITM process. Treat that as recovered instead of
+  // recursively scheduling "already running" restart attempts.
+  log("MITM server already running; treating restart as recovered");
+  await saveMitmSettings(true, sudoPassword);
+  if (sudoPassword) setCachedPassword(sudoPassword);
+  mitmRestartCount = 0;
+  mitmIsRestarting = false;
+  return true;
+}
+
 async function scheduleMitmRestart(apiKey) {
   if (mitmIsRestarting) return;
 
@@ -417,6 +474,7 @@ async function scheduleMitmRestart(apiKey) {
   log(`Restarting in ${delay / 1000}s... (${mitmRestartCount}/${MITM_MAX_RESTARTS})`);
   await new Promise((r) => setTimeout(r, delay));
 
+  let password = null;
   try {
     const settings = _getSettings ? await _getSettings() : null;
     if (settings && !settings.mitmEnabled) {
@@ -424,7 +482,7 @@ async function scheduleMitmRestart(apiKey) {
       mitmIsRestarting = false;
       return;
     }
-    const password = getCachedPassword() || await loadEncryptedPassword();
+    password = getCachedPassword() || await loadEncryptedPassword();
     if (!password && !IS_WIN) {
       err("No cached password, cannot auto-restart");
       mitmIsRestarting = false;
@@ -435,6 +493,7 @@ async function scheduleMitmRestart(apiKey) {
     mitmRestartCount = 0;
     mitmIsRestarting = false;
   } catch (e) {
+    if (await recoverAlreadyRunningRestart(e, password)) return;
     err(`Restart attempt ${mitmRestartCount}/${MITM_MAX_RESTARTS} failed: ${e.message}`);
     mitmIsRestarting = false;
     // Schedule next retry
@@ -487,6 +546,14 @@ async function startServer(apiKey, sudoPassword, forceKillPort443 = false) {
   }
 
   await killLeftoverMitm(sudoPassword);
+  
+  // Self-Healing DNS: Scrub hosts file before starting to fix any zombie entries from ungraceful crashes
+  log("🌐 Scrubbing previous DNS entries...");
+  try {
+    await removeAllDNSEntries(sudoPassword);
+  } catch (e) {
+    log(`🌐 Scrub failed (safe to ignore if clean): ${e.message}`);
+  }
 
   if (!IS_WIN) {
     const portStatus = await checkPort443Free();
@@ -591,6 +658,7 @@ async function startServer(apiKey, sudoPassword, forceKillPort443 = false) {
           ROUTER_API_KEY: apiKey,
           NODE_ENV: "production",
           MITM_ROUTER_BASE: mitmRouterBase,
+          PARENT_PID: process.pid.toString(),
         },
       }
     );
@@ -603,6 +671,7 @@ async function startServer(apiKey, sudoPassword, forceKillPort443 = false) {
       `HOME=${shellQuoteSingle(os.homedir())}`,
       `ROUTER_API_KEY=${shellQuoteSingle(apiKey)}`,
       `MITM_ROUTER_BASE=${shellQuoteSingle(mitmRouterBase)}`,
+      `PARENT_PID=${process.pid}`,
       "NODE_ENV=production",
       shellQuoteSingle(process.execPath),
       shellQuoteSingle(effectiveServerPath),
@@ -625,6 +694,7 @@ async function startServer(apiKey, sudoPassword, forceKillPort443 = false) {
         ROUTER_API_KEY: apiKey,
         NODE_ENV: "production",
         MITM_ROUTER_BASE: mitmRouterBase,
+        PARENT_PID: process.pid.toString(),
       },
     });
   }
@@ -848,4 +918,7 @@ module.exports = {
   restoreToolDNS,
   hasDnsPrivilege,
   removeAllDNSEntriesSync,
+  __test__: {
+    isAlreadyRunningRestartRecovery,
+  },
 };

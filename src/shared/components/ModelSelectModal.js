@@ -32,6 +32,8 @@ export default function ModelSelectModal({
   kindFilter = null,
   addedModelValues = [],
   closeOnSelect = true,
+  hideCombos = false,
+  onlyActiveProviders = false,
 }) {
   // Filter activeProviders by serviceKinds when kindFilter set (e.g. "webSearch", "webFetch")
   const filteredActiveProviders = useMemo(() => {
@@ -62,8 +64,8 @@ export default function ModelSelectModal({
   };
 
   useEffect(() => {
-    if (isOpen) fetchCombos();
-  }, [isOpen]);
+    if (isOpen && !hideCombos) fetchCombos();
+  }, [isOpen, hideCombos]);
 
   const fetchProviderNodes = async () => {
     try {
@@ -144,10 +146,13 @@ export default function ModelSelectModal({
       ? NO_AUTH_PROVIDER_IDS.filter((id) => (AI_PROVIDERS[id]?.serviceKinds || ["llm"]).includes(kindFilter))
       : NO_AUTH_PROVIDER_IDS;
 
-    // Only show connected providers (including both standard and custom)
+    // Only show connected providers (including both standard and custom).
+    // When onlyActiveProviders is set (e.g. the per-account allowed-models
+    // picker), exclude no-auth free providers so the list stays scoped to the
+    // single connection's provider.
     const providerIdsToShow = new Set([
-      ...activeConnectionIds,  // Only connected providers
-      ...noAuthIds,            // No-auth providers (kind-filtered)
+      ...activeConnectionIds,                       // Only connected providers
+      ...(onlyActiveProviders ? [] : noAuthIds),    // No-auth providers (kind-filtered)
     ]);
 
     // Sort by PROVIDER_ORDER
@@ -175,7 +180,7 @@ export default function ModelSelectModal({
 
       if (providerInfo.passthroughModels) {
         const aliasModels = Object.entries(modelAliases)
-          .filter(([, fullModel]) => fullModel.startsWith(`${alias}/`))
+          .filter(([, fullModel]) => typeof fullModel === "string" && fullModel.startsWith(`${alias}/`))
           .map(([aliasName, fullModel]) => ({
             id: fullModel.replace(`${alias}/`, ""),
             name: aliasName,
@@ -242,7 +247,7 @@ export default function ModelSelectModal({
         // Aliases are stored using the raw providerId as key (e.g. "openai-compatible-chat-<uuid>/glm-4.7"),
         // so we must filter by providerId, not by the display prefix.
         const nodeModels = Object.entries(modelAliases)
-          .filter(([, fullModel]) => fullModel.startsWith(`${providerId}/`))
+          .filter(([, fullModel]) => typeof fullModel === "string" && fullModel.startsWith(`${providerId}/`))
           .map(([aliasName, fullModel]) => ({
             id: fullModel.replace(`${providerId}/`, ""),
             name: aliasName,
@@ -275,6 +280,7 @@ export default function ModelSelectModal({
         const hasHardcoded = hardcodedModels.length > 0;
         const customAliasModels = Object.entries(modelAliases)
           .filter(([aliasName, fullModel]) =>
+            typeof fullModel === "string" &&
             fullModel.startsWith(`${alias}/`) &&
             (hasHardcoded ? aliasName === fullModel.replace(`${alias}/`, "") : true) &&
             !hardcodedIds.has(fullModel.replace(`${alias}/`, ""))
@@ -336,15 +342,15 @@ export default function ModelSelectModal({
     });
 
     return groups;
-  }, [filteredActiveProviders, modelAliases, allProviders, providerNodes, customModels, disabledModels, kindFilter, activeProviders]);
+  }, [filteredActiveProviders, modelAliases, allProviders, providerNodes, customModels, disabledModels, kindFilter, activeProviders, onlyActiveProviders]);
 
   // Filter combos by search query (and hide combos when kindFilter is set — combos are LLM-only by design)
   const filteredCombos = useMemo(() => {
-    if (kindFilter) return [];
+    if (kindFilter || hideCombos) return [];
     if (!searchQuery.trim()) return combos;
     const query = searchQuery.toLowerCase();
     return combos.filter(c => c.name.toLowerCase().includes(query));
-  }, [combos, searchQuery, kindFilter]);
+  }, [combos, searchQuery, kindFilter, hideCombos]);
 
   // Sort models alphabetically, with added models floated to top
   const sortModels = (models) => {
@@ -565,4 +571,6 @@ ModelSelectModal.propTypes = {
   kindFilter: PropTypes.string,
   addedModelValues: PropTypes.arrayOf(PropTypes.string),
   closeOnSelect: PropTypes.bool,
+  hideCombos: PropTypes.bool,
+  onlyActiveProviders: PropTypes.bool,
 };

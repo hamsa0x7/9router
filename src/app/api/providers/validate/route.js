@@ -168,7 +168,7 @@ export async function POST(request) {
           },
           body: JSON.stringify({
             model,
-            max_tokens: 1,
+            max_tokens: 10,
             messages: [{ role: "user", content: "test" }],
           }),
         });
@@ -188,14 +188,13 @@ export async function POST(request) {
           return NextResponse.json({ valid: false, error: "Missing Account ID" });
         }
         const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1/chat/completions`;
-        const cfRes = await fetch(url, {
+        const cfRes = await fetchOpenAIStyleWithTokenFallback(fetch, url, {
           method: "POST",
           headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: getDefaultModel("cloudflare-ai"),
-            messages: [{ role: "user", content: "test" }],
-            max_tokens: 1,
-          }),
+        }, {
+          model: getDefaultModel("cloudflare-ai"),
+          messages: [{ role: "user", content: "test" }],
+          max_tokens: OPENAI_STYLE_PROBE_MAX_TOKENS,
         });
         isValid = cfRes.status !== 401 && cfRes.status !== 403 && cfRes.status !== 404;
         return NextResponse.json({
@@ -218,13 +217,12 @@ export async function POST(request) {
         };
         if (organization) headers["OpenAI-Organization"] = organization;
 
-        const azureRes = await fetch(url, {
+        const azureRes = await fetchOpenAIStyleWithTokenFallback(fetch, url, {
           method: "POST",
           headers,
-          body: JSON.stringify({
-            messages: [{ role: "user", content: "test" }],
-            max_tokens: 1,
-          }),
+        }, {
+          messages: [{ role: "user", content: "test" }],
+          max_tokens: OPENAI_STYLE_PROBE_MAX_TOKENS,
         });
         isValid = azureRes.status !== 401 && azureRes.status !== 403;
         return NextResponse.json({
@@ -276,7 +274,7 @@ export async function POST(request) {
             },
             body: JSON.stringify({
               model: "claude-3-haiku-20240307",
-              max_tokens: 1,
+              max_tokens: getTestMaxTokens("anthropic"),
               messages: [{ role: "user", content: "test" }],
             }),
           });
@@ -296,7 +294,7 @@ export async function POST(request) {
           break;
 
         case "glm":
-        case "glm-cn":
+        case "bigmodel":
         case "kimi":
         case "minimax":
         case "minimax-cn":
@@ -305,15 +303,14 @@ export async function POST(request) {
         case "agentrouter": {
           // Use baseUrl from PROVIDERS (DRY); separate openai-format vs claude-format flow
           const cfg = PROVIDERS[provider];
-          const isOpenAiFormat = provider === "glm-cn" || provider === "alicode" || provider === "alicode-intl";
+          const isOpenAiFormat = provider === "bigmodel" || provider === "alicode" || provider === "alicode-intl";
 
           if (isOpenAiFormat) {
             const testModel = getDefaultModel(provider);
-            const res = await fetch(cfg.baseUrl, {
+            const res = await fetchOpenAIStyleWithTokenFallback(fetch, cfg.baseUrl, {
               method: "POST",
               headers: { "Authorization": `Bearer ${apiKey}`, "content-type": "application/json" },
-              body: JSON.stringify({ model: testModel, max_tokens: 1, messages: [{ role: "user", content: "test" }] }),
-            });
+            }, { model: testModel, max_tokens: OPENAI_STYLE_PROBE_MAX_TOKENS, messages: [{ role: "user", content: "test" }] });
             isValid = res.status !== 401 && res.status !== 403;
           } else {
             const testModel = getDefaultModel(provider) || "claude-sonnet-4-20250514";
@@ -325,7 +322,7 @@ export async function POST(request) {
                 "content-type": "application/json",
                 ...(cfg.headers || {}),
               },
-              body: JSON.stringify({ model: testModel, max_tokens: 1, messages: [{ role: "user", content: "test" }] }),
+              body: JSON.stringify({ model: testModel, max_tokens: getTestMaxTokens(provider), messages: [{ role: "user", content: "test" }] }),
             });
             // 400 = model resolution error but auth passed (e.g. agentrouter "no available channel")
             isValid = res.status !== 401 && res.status !== 403;
@@ -342,7 +339,7 @@ export async function POST(request) {
             },
             body: JSON.stringify({
               model: getDefaultModel(provider),
-              max_tokens: 1,
+              max_tokens: getTestMaxTokens(provider),
               messages: [{ role: "user", content: "test" }],
             }),
           });
@@ -391,15 +388,14 @@ export async function POST(request) {
         }
 
         case "opencode-go": {
-          const res = await fetch("https://opencode.ai/zen/go/v1/chat/completions", {
+          const res = await fetchOpenAIStyleWithTokenFallback(fetch, "https://opencode.ai/zen/go/v1/chat/completions", {
             method: "POST",
             headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
-            body: JSON.stringify({
-              model: getDefaultModel("opencode-go"),
-              messages: [{ role: "user", content: "ping" }],
-              max_tokens: 1,
-              stream: false,
-            }),
+          }, {
+            model: getDefaultModel("opencode-go"),
+            messages: [{ role: "user", content: "ping" }],
+            max_tokens: OPENAI_STYLE_PROBE_MAX_TOKENS,
+            stream: false,
           });
           isValid = res.status !== 401 && res.status !== 403;
           break;
@@ -410,7 +406,7 @@ export async function POST(request) {
           const model = getDefaultModel("commandcode");
           const payload = openaiToCommandCodeRequest(model, {
             messages: [{ role: "user", content: "ping" }],
-            max_tokens: 1,
+            max_tokens: 10,
             stream: false,
           }, false);
           const res = await fetch(cfg.baseUrl, {
@@ -436,17 +432,16 @@ export async function POST(request) {
         }
 
         case "blackbox": {
-          const res = await fetch("https://api.blackbox.ai/chat/completions", {
+          const res = await fetchOpenAIStyleWithTokenFallback(fetch, "https://api.blackbox.ai/chat/completions", {
             method: "POST",
             headers: {
               "Authorization": `Bearer ${apiKey}`,
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({
-              model: "gpt-4o",
-              messages: [{ role: "user", content: "test" }],
-              max_tokens: 10,
-            }),
+          }, {
+            model: "gpt-4o",
+            messages: [{ role: "user", content: "test" }],
+            max_tokens: OPENAI_STYLE_PROBE_MAX_TOKENS,
           });
           // Returns 401 for invalid key, 200 for valid, 400 for malformed
           isValid = res.status === 200 || res.status === 400;
@@ -605,12 +600,11 @@ export async function POST(request) {
           }
           // Fallback: minimal chat probe
           const defaultModel = getDefaultModel(provider) || "test";
-          const chatRes = await fetch(cfg.baseUrl, {
+          const chatRes = await fetchOpenAIStyleWithTokenFallback(fetch, cfg.baseUrl, {
             method: "POST",
             headers,
-            body: JSON.stringify({ model: defaultModel, messages: [{ role: "user", content: "ping" }], max_tokens: 1 }),
             signal: AbortSignal.timeout(10000),
-          });
+          }, { model: defaultModel, messages: [{ role: "user", content: "ping" }], max_tokens: OPENAI_STYLE_PROBE_MAX_TOKENS });
           isValid = chatRes.status !== 401 && chatRes.status !== 403;
           break;
         }

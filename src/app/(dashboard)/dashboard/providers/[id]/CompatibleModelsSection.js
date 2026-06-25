@@ -98,7 +98,7 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
 
   const allModels = getProviderCustomModelRows({
     customModels,
-    modelAliases,
+    modelAliases: modelAliases || {},
     providerAlias: providerStorageAlias,
     type: "llm",
   });

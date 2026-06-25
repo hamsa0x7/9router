@@ -93,7 +93,7 @@ export default function PassthroughModelsSection({ providerAlias, modelAliases, 
 
   const allModels = getProviderCustomModelRows({
     customModels,
-    modelAliases,
+    modelAliases: modelAliases || {},
     providerAlias,
     type: "llm",
   });
