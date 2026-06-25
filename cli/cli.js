@@ -137,13 +137,30 @@ if (skipUpdate && !trayMode && !process.stdin.isTTY) {
 // Always use Node.js runtime with absolute path
 const RUNTIME = process.execPath;
 
-// Compare semver versions: returns 1 if a > b, -1 if a < b, 0 if equal
+// Compare versions, including fork builds like 0.5.8-hamsa.123.
+// Returns 1 if a > b, -1 if a < b, 0 if equal.
 function compareVersions(a, b) {
-  const partsA = a.split(".").map(Number);
-  const partsB = b.split(".").map(Number);
+  function parse(v) {
+    const [base, pre = ""] = String(v).replace(/^v/, "").split("-");
+    const nums = base.split(".").slice(0, 3).map(n => parseInt(n, 10) || 0);
+    while (nums.length < 3) nums.push(0);
+    const hamsa = pre.match(/^hamsa\.(\d+)$/);
+    return { nums, hamsaBuild: hamsa ? parseInt(hamsa[1], 10) : null };
+  }
+
+  const va = parse(a);
+  const vb = parse(b);
   for (let i = 0; i < 3; i++) {
-    if (partsA[i] > partsB[i]) return 1;
-    if (partsA[i] < partsB[i]) return -1;
+    if (va.nums[i] > vb.nums[i]) return 1;
+    if (va.nums[i] < vb.nums[i]) return -1;
+  }
+
+  // Same upstream version: fork build beats plain upstream build.
+  if (va.hamsaBuild !== null && vb.hamsaBuild === null) return 1;
+  if (va.hamsaBuild === null && vb.hamsaBuild !== null) return -1;
+  if (va.hamsaBuild !== null && vb.hamsaBuild !== null) {
+    if (va.hamsaBuild > vb.hamsaBuild) return 1;
+    if (va.hamsaBuild < vb.hamsaBuild) return -1;
   }
   return 0;
 }
