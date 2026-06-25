@@ -103,12 +103,13 @@ jobs:
         id: pack
         run: |
           cd cli
+          VERSION=$(node -p "require('./package.json').version")
+          export FORK_VERSION="${VERSION}-hamsa.${GITHUB_RUN_NUMBER}"
+          node -e "const fs=require('fs'); for (const p of ['package.json','../package.json']) { const j=require('./'+p); j.version=process.env.FORK_VERSION; fs.writeFileSync(p, JSON.stringify(j,null,2)+'\n'); }" 
           npm pack --pack-destination ..
           TGZ=$(ls ../9router-*.tgz | head -1)
           echo "tgz=$(basename "$TGZ")" >> $GITHUB_OUTPUT
-          # Extract version from package.json
-          VERSION=$(node -p "require('./package.json').version")
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$FORK_VERSION" >> $GITHUB_OUTPUT
 
       - name: Create release
         if: steps.check.outputs.changed == 'true' && steps.rebase.outcome == 'success'
