@@ -58,6 +58,7 @@ try { ensureTrayRuntime({ silent: true }); } catch {}
 // Configuration constants
 const APP_NAME = pkg.name; // Use from package.json
 const INSTALL_CMD_LATEST = `npm i -g ${APP_NAME}@latest --prefer-online`;
+const FORK_REPO = "hamsa0x7/9router"; // Fork for auto-update releases
 
 const DEFAULT_PORT = 20128;
 const DEFAULT_HOST = "0.0.0.0";
@@ -416,8 +417,9 @@ function isRestrictedEnvironment() {
   return null;
 }
 
-// Check if new version available, return latest version or null
-function checkForUpdate() {
+// Check fork's GitHub releases for a newer version
+// Returns { version, asset } or null
+function checkForkUpdate() {
   return new Promise((resolve) => {
     if (skipUpdate) {
       resolve(null);
@@ -435,33 +437,98 @@ function checkForUpdate() {
       }
     }, 8000);
 
-    const done = (version) => {
+    const done = (result) => {
       if (resolved) return;
       resolved = true;
       clearTimeout(safetyTimeout);
       spinner.stop();
-      resolve(version);
+      resolve(result);
     };
 
-    const req = https.get(`https://registry.npmjs.org/${pkg.name}/latest`, { timeout: 3000 }, (res) => {
-      let data = "";
-      res.on("data", chunk => data += chunk);
-      res.on("end", () => {
-        try {
-          const latest = JSON.parse(data);
-          if (latest.version && compareVersions(latest.version, pkg.version) > 0) {
-            done(latest.version);
-          } else {
+    const req = https.get(
+      `https://api.github.com/repos/${FORK_REPO}/releases/latest`,
+      { headers: { "User-Agent": "9router-cli" }, timeout: 5000 },
+      (res) => {
+        let data = "";
+        res.on("data", chunk => data += chunk);
+        res.on("end", () => {
+          try {
+            const release = JSON.parse(data);
+            const tag = release.tag_name || "";
+            const version = tag.replace(/^v/, "");
+            if (!version) { done(null); return; }
+            if (compareVersions(version, pkg.version) > 0) {
+              const asset = (release.assets || []).find(a => a.name.endsWith(".tgz"));
+              if (asset) {
+                done({ version, asset });
+              } else {
+                done(null);
+              }
+            } else {
+              done(null);
+            }
+          } catch (e) {
             done(null);
           }
-        } catch (e) {
-          done(null);
-        }
-      });
-    });
+        });
+      }
+    );
 
     req.on("error", () => done(null));
     req.on("timeout", () => { req.destroy(); done(null); });
+  });
+}
+
+// Download and install tarball from GitHub release
+function autoInstallFromRelease(updateInfo) {
+  return new Promise((resolve) => {
+    if (!updateInfo || !updateInfo.asset) {
+      resolve(false);
+      return;
+    }
+
+    const spinner = createSpinner(`Updating to v${updateInfo.version}...`).start();
+    const tmpDir = path.join(os.tmpdir(), "9router-update");
+    try { fs.mkdirSync(tmpDir, { recursive: true }); } catch {}
+    const tmpFile = path.join(tmpDir, updateInfo.asset.name);
+
+    function downloadAndInstall(url) {
+      const file = fs.createWriteStream(tmpFile);
+      const dlReq = https.get(url, {
+        headers: { "User-Agent": "9router-cli" },
+        timeout: 60000,
+      }, (res) => {
+        if (res.statusCode === 302 && res.headers.location) {
+          downloadAndInstall(res.headers.location);
+          return;
+        }
+        res.pipe(file);
+        file.on("finish", () => {
+          file.close();
+          try {
+            execSync(`npm install -g "${tmpFile}"`, { stdio: "pipe", windowsHide: true });
+            try { fs.unlinkSync(tmpFile); } catch {}
+            spinner.succeed(`Updated to v${updateInfo.version}`);
+            resolve(true);
+          } catch (e) {
+            try { fs.unlinkSync(tmpFile); } catch {}
+            spinner.fail("Update install failed");
+            resolve(false);
+          }
+        });
+      });
+      dlReq.on("error", () => {
+        spinner.fail("Update download failed");
+        resolve(false);
+      });
+      dlReq.on("timeout", () => {
+        dlReq.destroy();
+        spinner.fail("Update download timed out");
+        resolve(false);
+      });
+    }
+
+    downloadAndInstall(updateInfo.asset.browser_download_url);
   });
 }
 
@@ -499,13 +566,37 @@ if (!fs.existsSync(serverPath)) {
   process.exit(1);
 }
 
-// Check for updates FIRST, then start server
-checkForUpdate().then((latestVersion) => {
-  killAllAppProcesses(port).then(() => {
-    return killProcessOnPort(port);
-  }).then(() => {
-    startServer(latestVersion);
-  });
+// Check for updates FIRST, auto-install if available, then start server
+checkForkUpdate().then((updateInfo) => {
+  if (updateInfo) {
+    autoInstallFromRelease(updateInfo).then((updated) => {
+      if (updated) {
+        // Relaunch with --skip-update to avoid re-checking
+        const relaunchArgs = [...args, "--skip-update"];
+        const child = spawn(process.execPath, [__filename, ...relaunchArgs], {
+          detached: true,
+          stdio: "inherit",
+          windowsHide: true,
+        });
+        child.unref();
+        process.exit(0);
+      } else {
+        // Install failed — start with current version
+        killAllAppProcesses(port).then(() => {
+          return killProcessOnPort(port);
+        }).then(() => {
+          startServer(null);
+        });
+      }
+    });
+  } else {
+    // No update — start normally
+    killAllAppProcesses(port).then(() => {
+      return killProcessOnPort(port);
+    }).then(() => {
+      startServer(null);
+    });
+  }
 });
 
 // Show interface selection menu
@@ -529,27 +620,18 @@ async function showInterfaceMenu(latestVersion) {
 
   const subtitle = `🚀 Server: \x1b[32m${serverUrl}\x1b[0m`;
 
-  const menuItems = [];
-
-  if (latestVersion) {
-    menuItems.push({ label: `Update to v${latestVersion} (current: v${pkg.version})`, icon: "⬆" });
-  }
-
-  menuItems.push(
+  const menuItems = [
     { label: "Web UI (Open in Browser)", icon: "🌐" },
     { label: "Terminal UI (Interactive CLI)", icon: "💻" },
     { label: "Hide to Tray (Background)", icon: "🔔" },
     { label: "Exit", icon: "🚪" }
-  );
+  ];
 
   const selected = await selectMenu(`Choose Interface (v${pkg.version})`, menuItems, 0, subtitle);
 
-  const offset = latestVersion ? 1 : 0;
-
-  if (latestVersion && selected === 0) return "update";
-  if (selected === offset) return "web";
-  if (selected === offset + 1) return "terminal";
-  if (selected === offset + 2) return "hide";
+  if (selected === 0) return "web";
+  if (selected === 1) return "terminal";
+  if (selected === 2) return "hide";
   return "exit";
 }
 
@@ -695,19 +777,7 @@ function startServer(latestVersion) {
       while (true) {
         const choice = await showInterfaceMenu(latestVersion);
 
-        if (choice === "update") {
-          isShuttingDown = true;
-          const { clearScreen } = require("./src/cli/utils/display");
-          clearScreen();
-          console.log(`\n⬆  Update v${pkg.version} → v${latestVersion}\n`);
-          console.log(`Run this after exit:\n`);
-          console.log(`   \x1b[33m${INSTALL_CMD_LATEST}\x1b[0m\n`);
-          cleanup();
-          await killAllAppProcesses(port);
-          await killProcessOnPort(port);
-          setTimeout(() => process.exit(0), 200);
-          return;
-        } else if (choice === "web") {
+        if (choice === "web") {
           openBrowser(url);
           // Wait for user to come back
           const { pause } = require("./src/cli/utils/input");
