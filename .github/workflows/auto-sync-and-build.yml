@@ -1,0 +1,125 @@
+name: Auto-sync upstream, rebase mods, build & release
+
+on:
+  schedule:
+    # Every 6 hours
+    - cron: "0 */6 * * *"
+  workflow_dispatch: # Manual trigger
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  sync-rebase-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/decolua/9router.git
+          git fetch upstream
+
+      - name: Check for new upstream commits
+        id: check
+        run: |
+          LOCAL=$(git rev-parse origin/master)
+          UPSTREAM=$(git rev-parse upstream/master)
+          echo "local=$LOCAL" >> $GITHUB_OUTPUT
+          echo "upstream=$UPSTREAM" >> $GITHUB_OUTPUT
+          if [ "$LOCAL" = "$UPSTREAM" ]; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No new upstream commits."
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "New upstream commits detected."
+          fi
+
+      - name: Sync master with upstream
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          git checkout master
+          git merge upstream/master --no-edit
+          git push origin master
+
+      - name: Rebase mods branch
+        if: steps.check.outputs.changed == 'true'
+        id: rebase
+        continue-on-error: true
+        run: |
+          git checkout mods/hamsa-all
+          git rebase master
+          git push --force-with-lease origin mods/hamsa-all
+
+      - name: Create issue on rebase conflict
+        if: steps.check.outputs.changed == 'true' && steps.rebase.outcome == 'failure'
+        run: |
+          gh issue create \
+            --title "Rebase conflict: mods/hamsa-all needs manual resolution" \
+            --body "Upstream released new commits but rebase of \`mods/hamsa-all\` onto \`master\` failed.
+
+          Run locally to resolve:
+          \`\`\`bash
+          git checkout mods/hamsa-all
+          git rebase master
+          # Resolve conflicts, then:
+          git push --force-with-lease origin mods/hamsa-all
+          \`\`\`
+          " || true
+
+      - name: Setup Node.js
+        if: steps.check.outputs.changed == 'true' && steps.rebase.outcome == 'success'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        if: steps.check.outputs.changed == 'true' && steps.rebase.outcome == 'success'
+        run: npm install
+
+      - name: Build CLI
+        if: steps.check.outputs.changed == 'true' && steps.rebase.outcome == 'success'
+        run: |
+          cd cli
+          npm install
+          npm run build
+
+      - name: Pack tarball
+        if: steps.check.outputs.changed == 'true' && steps.rebase.outcome == 'success'
+        id: pack
+        run: |
+          cd cli
+          npm pack --pack-destination ..
+          TGZ=$(ls ../9router-*.tgz | head -1)
+          echo "tgz=$TGZ" >> $GITHUB_OUTPUT
+          # Extract version from package.json
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create release
+        if: steps.check.outputs.changed == 'true' && steps.rebase.outcome == 'success'
+        run: |
+          gh release create "v${{ steps.pack.outputs.version }}" \
+            "${{ steps.pack.outputs.tgz }}" \
+            --title "v${{ steps.pack.outputs.version }}" \
+            --notes "Auto-built from upstream sync + mods/hamsa-all rebase.
+
+          Install:
+          \`\`\`bash
+          npm install -g 9router-${{ steps.pack.outputs.version }}.tgz
+          \`\`\`
+          " \
+            --repo hamsa0x7/9router
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
