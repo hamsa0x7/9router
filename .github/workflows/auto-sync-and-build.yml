@@ -38,7 +38,10 @@ jobs:
           UPSTREAM=$(git rev-parse upstream/master)
           echo "local=$LOCAL" >> $GITHUB_OUTPUT
           echo "upstream=$UPSTREAM" >> $GITHUB_OUTPUT
-          if [ "$LOCAL" = "$UPSTREAM" ]; then
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Manual run — forcing build."
+          elif [ "$LOCAL" = "$UPSTREAM" ]; then
             echo "changed=false" >> $GITHUB_OUTPUT
             echo "No new upstream commits."
           else
@@ -123,3 +126,4 @@ jobs:
             --repo hamsa0x7/9router
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
