@@ -102,7 +102,7 @@ jobs:
           cd cli
           npm pack --pack-destination ..
           TGZ=$(ls ../9router-*.tgz | head -1)
-          echo "tgz=$TGZ" >> $GITHUB_OUTPUT
+          echo "tgz=$(basename "$TGZ")" >> $GITHUB_OUTPUT
           # Extract version from package.json
           VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
