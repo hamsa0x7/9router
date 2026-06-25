@@ -89,7 +89,8 @@ let host = DEFAULT_HOST;
 let noBrowser = false;
 let skipUpdate = false;
 let showLog = false;
-let trayMode = false;
+let trayMode = true; // Default: tray mode (start + dashboard + tray)
+let menuMode = false; // Explicit --menu flag to get old interactive menu
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--port" || args[i] === "-p") {
@@ -107,6 +108,9 @@ for (let i = 0; i < args.length; i++) {
   } else if (args[i] === "--tray" || args[i] === "-t") {
     trayMode = true;
     process.env.TRAY_MODE = "1";
+  } else if (args[i] === "--menu" || args[i] === "-m") {
+    menuMode = true;
+    trayMode = false;
   } else if (args[i] === "--help" || args[i] === "-h") {
     console.log(`
 Usage: ${APP_NAME} [options]
@@ -116,10 +120,12 @@ Options:
   -H, --host <host>   Host to bind (default: ${DEFAULT_HOST})
   -n, --no-browser    Don't open browser automatically
   -l, --log           Show server logs (default: hidden)
-  -t, --tray          Run in system tray mode (background)
+  -m, --menu          Show interactive menu (legacy mode)
   --skip-update       Skip auto-update check
   -h, --help          Show this help message
   -v, --version       Show version
+
+Default behavior: start server, open dashboard, minimize to tray.
 `);
     process.exit(0);
   } else if (args[i] === "--version" || args[i] === "-v") {
@@ -132,6 +138,31 @@ Options:
 if (skipUpdate && !trayMode && !process.stdin.isTTY) {
   trayMode = true;
   process.env.TRAY_MODE = "1";
+}
+
+// Windows early detach: if we're in a terminal (TTY) and tray mode is on,
+// immediately spawn a detached background process and exit. This way the
+// terminal closes in <1s and only the background process does the real work
+// (update check, kill old instances, start server, tray icon). Without this,
+// closing the terminal window force-kills everything in its console group.
+if (trayMode && process.platform === "win32" && process.stdout && process.stdout.isTTY && !process.env.IS_DETACHED) {
+  const bgArgs = [__filename];
+  const origArgs = process.argv.slice(2);
+  if (!origArgs.includes("--tray") && !origArgs.includes("-t")) bgArgs.push("--tray");
+  bgArgs.push(...origArgs);
+
+  const bgProcess = spawn(process.execPath, bgArgs, {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+    env: { ...process.env, IS_DETACHED: "1" }
+  });
+  bgProcess.unref();
+
+  console.log(`\n🚀 9Router starting in background (PID: ${bgProcess.pid})`);
+  console.log(`   Server will be at: http://localhost:${port}`);
+  console.log(`\n💡 You can close this terminal. Right-click tray icon to quit.\n`);
+  process.exit(0);
 }
 
 // Always use Node.js runtime with absolute path
@@ -203,7 +234,7 @@ function killCloudflaredByAppPort(appPort) {
   const pids = [];
   try {
     if (process.platform === "win32") {
-      const psCmd = `powershell -NonInteractive -WindowStyle Hidden -Command "Get-WmiObject Win32_Process -Filter 'Name=\\"cloudflared.exe\\"' | Select-Object ProcessId,CommandLine | ConvertTo-Csv -NoTypeInformation"`;
+      const psCmd = `powershell -NonInteractive -WindowStyle Hidden -Command "Get-CimInstance Win32_Process -Filter 'Name=\\"cloudflared.exe\\"' | Select-Object ProcessId,CommandLine | ConvertTo-Csv -NoTypeInformation"`;
       const output = execSync(psCmd, { encoding: "utf8", windowsHide: true, timeout: 5000 });
       const lines = output.split("\n").slice(1).filter(l => l.trim());
       lines.forEach(line => {
@@ -244,7 +275,7 @@ function killAllAppProcesses(appPort) {
       if (platform === "win32") {
         // Windows: use WMI to get full CommandLine (tasklist /V doesn't include it)
         try {
-          const psCmd = `powershell -NonInteractive -WindowStyle Hidden -Command "Get-WmiObject Win32_Process -Filter 'Name=\\"node.exe\\"' | Select-Object ProcessId,CommandLine | ConvertTo-Csv -NoTypeInformation"`;
+          const psCmd = `powershell -NonInteractive -WindowStyle Hidden -Command "Get-CimInstance Win32_Process -Filter 'Name=\\"node.exe\\"' | Select-Object ProcessId,CommandLine | ConvertTo-Csv -NoTypeInformation"`;
           const output = execSync(psCmd, {
             encoding: "utf8",
             windowsHide: true,
