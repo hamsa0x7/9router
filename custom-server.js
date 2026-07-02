@@ -1,5 +1,14 @@
 const http = require("http");
 
+// Renaming next-server process to a unique name while keeping "next-server"
+// in the name for backward compatibility with existing process-matching whitelists.
+process.title = "9router next-server";
+Object.defineProperty(process, "title", {
+  get: () => "9router next-server",
+  set: () => {},
+  configurable: true
+});
+
 const origCreate = http.createServer.bind(http);
 
 // Wrap Next standalone HTTP server: derive client IP from the TCP socket
