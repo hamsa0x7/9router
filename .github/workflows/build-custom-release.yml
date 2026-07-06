@@ -1,0 +1,137 @@
+name: Build custom 9Router release
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: Upstream branch, tag, or ref to build
+        default: master
+        required: true
+      force_release:
+        description: Create a release even if this upstream version was already released
+        type: boolean
+        default: false
+  schedule:
+    - cron: "17 */6 * * *"
+
+permissions:
+  contents: write
+
+env:
+  UPSTREAM_REPO: https://github.com/decolua/9router.git
+  FORK_REPO: hamsa0x7/9router
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout fork automation
+        uses: actions/checkout@v4
+        with:
+          path: fork
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Clone upstream
+        shell: pwsh
+        run: |
+          $ref = "${{ github.event.inputs.upstream_ref }}"
+          if (-not $ref) { $ref = "master" }
+          git clone --depth 1 --branch $ref $env:UPSTREAM_REPO upstream
+
+      - name: Apply local overlay
+        shell: pwsh
+        run: |
+          ./fork/local-mods/apply-overlay.ps1 -TargetRepo ./upstream -OverlayRoot ./fork/local-mods/overlay
+
+      - name: Compute custom version
+        id: version
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE_RELEASE: ${{ github.event.inputs.force_release }}
+        run: |
+          Push-Location upstream
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          $base = [string]$pkg.version
+          Pop-Location
+
+          $latestBody = ""
+          try {
+            $latestBody = gh release view --repo $env:FORK_REPO --json body -q .body 2>$null
+          } catch {}
+
+          $force = $env:FORCE_RELEASE -eq "true"
+          if (-not $force -and $latestBody -match [regex]::Escape("Upstream version: $base")) {
+            "skip=true" >> $env:GITHUB_OUTPUT
+            "base=$base" >> $env:GITHUB_OUTPUT
+            Write-Host "Already released upstream version $base; skipping."
+            exit 0
+          }
+
+          $parts = $base.Split('.') | ForEach-Object { [int]$_ }
+          if ($parts.Count -lt 3) { throw "Expected semver version, got $base" }
+          $customPatch = ($parts[2] * 10000) + [int]$env:GITHUB_RUN_NUMBER
+          $custom = "$($parts[0]).$($parts[1]).$customPatch"
+          "skip=false" >> $env:GITHUB_OUTPUT
+          "base=$base" >> $env:GITHUB_OUTPUT
+          "custom=$custom" >> $env:GITHUB_OUTPUT
+          "tag=v$custom" >> $env:GITHUB_OUTPUT
+
+      - name: Set package versions
+        if: steps.version.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $custom = "${{ steps.version.outputs.custom }}"
+          foreach ($file in @("upstream/package.json", "upstream/cli/package.json")) {
+            $pkg = Get-Content $file -Raw | ConvertFrom-Json
+            $pkg.version = $custom
+            $pkg | ConvertTo-Json -Depth 100 | Set-Content $file -Encoding UTF8
+          }
+
+      - name: Install dependencies
+        if: steps.version.outputs.skip != 'true'
+        shell: pwsh
+        working-directory: upstream
+        run: |
+          npm install
+          npm --prefix cli install
+
+      - name: Build CLI bundle
+        if: steps.version.outputs.skip != 'true'
+        shell: pwsh
+        working-directory: upstream
+        run: npm --prefix cli run build
+
+      - name: Pack CLI tarball
+        if: steps.version.outputs.skip != 'true'
+        shell: pwsh
+        working-directory: upstream
+        run: |
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          npm --prefix cli pack --pack-destination (Resolve-Path dist)
+          Get-ChildItem dist
+
+      - name: Publish fork release
+        if: steps.version.outputs.skip != 'true'
+        shell: pwsh
+        working-directory: upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ steps.version.outputs.tag }}"
+          $base = "${{ steps.version.outputs.base }}"
+          $custom = "${{ steps.version.outputs.custom }}"
+          $asset = Get-ChildItem dist -Filter "*.tgz" | Select-Object -First 1
+          if (-not $asset) { throw "No package tarball produced" }
+          $notes = @"
+          Custom 9Router build from hamsa0x7/9router.
+
+          Upstream version: $base
+          Custom version: $custom
+          Source workflow run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID
+          "@
+          gh release create $tag $asset.FullName --repo $env:FORK_REPO --title "9Router custom $custom" --notes $notes --latest
