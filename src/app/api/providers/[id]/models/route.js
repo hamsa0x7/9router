@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getProviderConnectionById } from "@/models";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
+import { APIKEY_PROVIDERS, OAUTH_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS } from "@/shared/constants/providers";
 import { GEMINI_CONFIG } from "@/lib/oauth/constants/oauth";
 import { refreshGoogleToken, updateProviderCredentials } from "@/sse/services/tokenRefresh";
 import { resolveOllamaLocalHost } from "open-sse/config/providers.js";
@@ -474,6 +475,26 @@ export async function GET(request, { params }) {
 
     const config = PROVIDER_MODELS_CONFIG[connection.provider];
     if (!config) {
+      // Fallback: check if provider has modelsFetcher in its registry entry
+      const providerInfo = APIKEY_PROVIDERS[connection.provider] || OAUTH_PROVIDERS[connection.provider] || FREE_PROVIDERS[connection.provider] || FREE_TIER_PROVIDERS[connection.provider];
+      const fetcher = providerInfo?.modelsFetcher;
+      if (fetcher?.url) {
+        try {
+          const response = await fetch(fetcher.url);
+          if (!response.ok) {
+            return NextResponse.json({ error: `Failed to fetch models: ${response.status}` }, { status: 500 });
+          }
+          const json = await response.json();
+          const models = json.data ?? json.models ?? json;
+          return NextResponse.json({
+            provider: connection.provider,
+            connectionId: connection.id,
+            models: Array.isArray(models) ? models : [],
+          });
+        } catch (err) {
+          return NextResponse.json({ error: "Failed to fetch models" }, { status: 500 });
+        }
+      }
       return NextResponse.json(
         { error: `Provider ${connection.provider} does not support models listing` },
         { status: 400 }

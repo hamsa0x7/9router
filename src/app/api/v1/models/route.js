@@ -14,6 +14,7 @@ import { resolveCopilotModels } from "open-sse/services/copilotModels.js";
 import { resolveClinepassModels } from "open-sse/services/clinepassModels.js";
 import { updateProviderCredentials } from "@/sse/services/tokenRefresh";
 import { capabilitiesFromServiceKind } from "open-sse/providers/capabilities.js";
+import { PROVIDERS } from "open-sse/config/providers.js";
 
 // Per-provider live model resolvers. Each receives a connection record and
 // returns { models: [{ id, name? }, ...] } | null on failure.
@@ -114,10 +115,15 @@ function inferKindFromUnknownModelId(modelId) {
 async function fetchCompatibleModelIds(connection) {
   if (!connection?.apiKey) return [];
 
-  const baseUrl = typeof connection?.providerSpecificData?.baseUrl === "string"
+  // Try custom node baseUrl first, then fall back to registry transport baseUrl
+  let baseUrl = typeof connection?.providerSpecificData?.baseUrl === "string"
     ? connection.providerSpecificData.baseUrl.trim().replace(/\/$/, "")
     : "";
-
+  if (!baseUrl) {
+    const cfg = PROVIDERS[connection.provider];
+    if (cfg?.validateUrl) baseUrl = cfg.validateUrl.replace(/\/models$/, "");
+    else if (cfg?.baseUrl) baseUrl = cfg.baseUrl.replace(/\/chat\/completions$/, "").replace(/\/v1\/chat\/completions$/, "/v1");
+  }
   if (!baseUrl) return [];
 
   let url = `${baseUrl}/models`;
@@ -319,8 +325,17 @@ export async function buildModelsList(kindFilter) {
           )
         : providerModels.map((model) => model.id);
 
-      if (isCompatibleProvider && rawModelIds.length === 0 && !UPSTREAM_CONNECTION_RE.test(providerId)) {
-        rawModelIds = await fetchCompatibleModelIds(conn);
+      // Always attempt live model discovery for compatible providers (OpenAI / Anthropic).
+      // Merge live IDs with static IDs so users see the full catalog after adding a key.
+      if (isCompatibleProvider && !UPSTREAM_CONNECTION_RE.test(providerId)) {
+        try {
+          const liveIds = await fetchCompatibleModelIds(conn);
+          if (liveIds.length > 0) {
+            rawModelIds = Array.from(new Set([...rawModelIds, ...liveIds]));
+          }
+        } catch (err) {
+          console.log(`Live model fetch failed for ${providerId}: ${err?.message || err}`);
+        }
       }
 
       // Config-driven live catalog override (e.g. Kiro returns dynamic

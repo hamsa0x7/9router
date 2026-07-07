@@ -711,8 +711,27 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
         }, effectiveProxy);
         return { valid: res.ok, error: res.ok ? null : "Invalid API key" };
       }
-      default:
+      default: {
+        // Generic probe: try the provider's validateUrl from PROVIDERS
+        const cfg = PROVIDERS[connection.provider];
+        const validateUrl = cfg?.validateUrl;
+        if (validateUrl) {
+          const res = await fetchWithConnectionProxy(validateUrl, {
+            headers: { Authorization: `Bearer ${connection.apiKey}` },
+          }, effectiveProxy);
+          return { valid: res.ok, error: res.ok ? null : "Invalid API key" };
+        }
+        // Fallback: try baseUrl-derived /models
+        const baseUrl = cfg?.baseUrl;
+        if (baseUrl) {
+          const modelsUrl = baseUrl.replace(/\/chat\/completions$/, "/models");
+          const res = await fetchWithConnectionProxy(modelsUrl, {
+            headers: { Authorization: `Bearer ${connection.apiKey}` },
+          }, effectiveProxy);
+          return { valid: res.ok, error: res.ok ? null : "Invalid API key" };
+        }
         return { valid: false, error: "Provider test not supported" };
+      }
     }
   } catch (err) {
     return { valid: false, error: err.message };

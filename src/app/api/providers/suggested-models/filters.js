@@ -23,4 +23,10 @@ export const FILTERS = {
     (Array.isArray(models) ? models : [])
       .filter((m) => m.id?.startsWith("mimo") || m.name?.toLowerCase().includes("mimo"))
       .map((m) => ({ id: m.id, name: m.name || m.id })),
+
+  // Standard OpenAI /v1/models response: { object: "list", data: [{ id, ... }] }
+  openai: (models) =>
+    (Array.isArray(models) ? models : [])
+      .filter((m) => m.id && m.id !== "unknown")
+      .map((m) => ({ id: m.id, name: m.name || m.id })),
 };

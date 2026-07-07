@@ -55,6 +55,7 @@ export const DEFAULT_CAPABILITIES = {
 // runtime capability names used here. Map those typed model kinds into input /
 // output capabilities so custom vision models are not treated as text-only.
 const SERVICE_KIND_CAPABILITIES = {
+  llm: { vision: true, reasoning: true, search: true, contextWindow: 200000, maxOutput: 64000 },
   imageToText: { vision: true },
   image: { imageOutput: true },
   stt: { audioInput: true },
