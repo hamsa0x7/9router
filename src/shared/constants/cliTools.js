@@ -56,6 +56,7 @@ export const MITM_TOOLS = {
     configType: "mitm",
     mitmDomain: "q.us-east-1.amazonaws.com",
     defaultModels: [
+      { id: "auto", name: "Auto (Kiro Agent)", alias: "auto" },
       { id: "claude-sonnet-5", name: "Claude Sonnet 5", alias: "claude-sonnet-5" },
       { id: "claude-sonnet-4.5", name: "Claude Sonnet 4.5", alias: "claude-sonnet-4.5" },
       { id: "claude-sonnet-4", name: "Claude Sonnet 4", alias: "claude-sonnet-4" },
@@ -313,23 +314,44 @@ amp --model "{{model}}"
   },
   "deepseek-tui": {
     id: "deepseek-tui",
-    name: "DeepSeek TUI",
-    image: "/providers/deepseek-tui.png",
+    name: "CodeWhale",
+    image: "/providers/codewhale.png",
     color: "#4D6BFE",
-    description: "DeepSeek Terminal Coding Agent (Rust TUI)",
-    docsUrl: "https://github.com/DeepSeek-TUI/DeepSeek-TUI",
+    description: "CodeWhale terminal coding agent with multi-provider support",
+    docsUrl: "https://github.com/Hmbown/CodeWhale",
     configType: "custom",
-    defaultCommand: "deepseek",
-    modelAliases: ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"],
+    defaultCommand: "codewhale",
+    modelAliases: ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner", "gpt-4.1", "glm-5"],
     defaultModels: [
       { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", alias: "deepseek-v4-pro" },
       { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", alias: "deepseek-v4-flash" },
       { id: "deepseek-chat", name: "DeepSeek V3 Chat", alias: "deepseek-chat" },
+      { id: "gpt-4.1", name: "GPT-4.1", alias: "gpt-4.1" },
     ],
     notes: [
-      { type: "info", text: "DeepSeek TUI uses ~/.deepseek/config.toml for configuration. 9Router will update the provider to 'openai' mode with your base_url, api_key, and model." },
-      { type: "warning", text: "Config path: Linux/macOS ~/.deepseek/config.toml • Windows %USERPROFILE%\\.deepseek\\config.toml" },
+      { type: "info", text: "CodeWhale uses ~/.codewhale/config.toml. 9Router seeds the OpenAI provider entry so you can point CodeWhale at 9Router and still switch to its other providers later." },
+      { type: "warning", text: "Config path: Linux/macOS ~/.codewhale/config.toml • Windows %USERPROFILE%\\.codewhale\\config.toml" },
     ],
+    guideSteps: [
+      { step: 1, title: "Install CodeWhale", desc: "Download from GitHub releases or build from source" },
+      { step: 2, title: "API Key", type: "apiKeySelector" },
+      { step: 3, title: "Base URL", value: "{{baseUrl}}", copyable: true },
+      { step: 4, title: "Select Model", type: "modelSelector" },
+      { step: 5, title: "Save Config", desc: "Copy the TOML below to ~/.codewhale/config.toml" },
+    ],
+    codeBlock: {
+      language: "toml",
+      code: `[providers.openai]
+base_url = "{{baseUrl}}"
+api_key = "{{apiKey}}"
+model = "{{model}}"
+
+[providers.deepseek]
+base_url = "https://api.deepseek.com"
+api_key = "your-deepseek-key"
+model = "deepseek-chat"
+`,
+    },
   },
   jcode: {
     id: "jcode",
@@ -358,6 +380,98 @@ amp --model "{{model}}"
       { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", alias: "sonnet", defaultValue: "cc/claude-sonnet-4-6" },
       { id: "gpt-5.5", name: "GPT 5.5", alias: "gpt5", defaultValue: "cx/gpt-5.5" },
       { id: "gemini-3.1-pro", name: "Gemini 3.1 Pro", alias: "gemini", defaultValue: "gemini/gemini-3.1-pro" },
+    ],
+  },
+  pi: {
+    id: "pi",
+    name: "Pi",
+    image: "/providers/pi.svg",
+    color: "#7C3AED",
+    description: "Pi terminal coding harness by earendil-works",
+    docsUrl: "https://pi.dev",
+    configType: "custom",
+    defaultCommand: "pi",
+    notes: [
+      { type: "info", text: "Pi reads custom OpenAI-compatible providers from ~/.pi/agent/models.json. Add 9Router there, then select the 9Router model from Pi's /model menu." },
+      { type: "warning", text: "Config path: Linux/macOS ~/.pi/agent/models.json • Windows %USERPROFILE%\\.pi\\agent\\models.json" },
+    ],
+    guideSteps: [
+      { step: 1, title: "Install Pi", desc: "npm install -g @earendil-works/pi-coding-agent" },
+      { step: 2, title: "API Key", type: "apiKeySelector" },
+      { step: 3, title: "Base URL", value: "{{baseUrl}}", copyable: true },
+      { step: 4, title: "Select Model", type: "modelSelector" },
+      { step: 5, title: "Save Config", desc: "Copy the JSON below to ~/.pi/agent/models.json, then run pi and choose the model with /model." },
+    ],
+    codeBlock: {
+      language: "json",
+      code: `{
+  "providers": {
+    "9router": {
+      "baseUrl": "{{baseUrl}}",
+      "api": "openai-completions",
+      "apiKey": "{{apiKey}}",
+      "authHeader": true,
+      "models": [
+        {
+          "id": "{{model}}",
+          "name": "{{model}} via 9Router",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "contextWindow": 200000,
+          "maxTokens": 32000
+        }
+      ]
+    }
+  }
+}`,
+    },
+  },
+  omp: {
+    id: "omp",
+    name: "Oh My Pi",
+    image: "/providers/omp.png",
+    color: "#F97316",
+    description: "Oh My Pi terminal coding agent with SQLite-backed auth",
+    docsUrl: "https://github.com/nicepkg/omp",
+    configType: "custom",
+    defaultCommand: "omp",
+    modelAliases: ["coder-model", "vision-model", "fast-model", "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gemini-3-flash", "gpt-5.5"],
+    defaultModels: [
+      { id: "coder-model", name: "Coder Model", alias: "coder-model" },
+      { id: "vision-model", name: "Vision Model", alias: "vision-model" },
+      { id: "fast-model", name: "Fast Model", alias: "fast-model" },
+      { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", alias: "claude-sonnet-4-6" },
+      { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)", alias: "claude-opus-4-6-thinking" },
+      { id: "gemini-3-flash", name: "Gemini 3 Flash", alias: "gemini-3-flash" },
+      { id: "gpt-5.5", name: "GPT 5.5", alias: "gpt-5.5" },
+    ],
+    notes: [
+      { type: "info", text: "OMP uses ~/.omp/agent/models.yml for provider config and ~/.omp/agent/agent.db (SQLite) for auth credentials. 9Router will add itself as a provider with auto-discovery." },
+      { type: "warning", text: "Config path: Linux/macOS ~/.omp/agent/ • Windows %USERPROFILE%\\.omp\\agent\\" },
+    ],
+  },
+  letta: {
+    id: "letta",
+    name: "Letta CLI",
+    image: "/providers/letta.png",
+    color: "#8B5CF6",
+    description: "Letta CLI — AI agent with persistent memory (local mode)",
+    docsUrl: "https://github.com/letta-ai/letta",
+    configType: "custom",
+    defaultCommand: "letta",
+    modelAliases: ["coder-model", "vision-model", "fast-model", "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gemini-3-flash", "gpt-5.5"],
+    defaultModels: [
+      { id: "coder-model", name: "Coder Model", alias: "coder-model" },
+      { id: "vision-model", name: "Vision Model", alias: "vision-model" },
+      { id: "fast-model", name: "Fast Model", alias: "fast-model" },
+      { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", alias: "claude-sonnet-4-6" },
+      { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)", alias: "claude-opus-4-6-thinking" },
+      { id: "gemini-3-flash", name: "Gemini 3 Flash", alias: "gemini-3-flash" },
+      { id: "gpt-5.5", name: "GPT 5.5", alias: "gpt-5.5" },
+    ],
+    notes: [
+      { type: "info", text: "Letta CLI uses ~/.letta/lc-local-backend/providers/auth.json for provider config and ~/.letta/settings.json for backend mode. 9Router adds itself as a 'lmstudio' provider and switches Letta to 'local' backend mode." },
+      { type: "warning", text: "Config path: Linux/macOS ~/.letta/ • Windows %USERPROFILE%\\.letta\\" },
     ],
   },
   // HIDDEN: gemini-cli
