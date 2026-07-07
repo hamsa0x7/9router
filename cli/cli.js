@@ -650,7 +650,7 @@ async function showInterfaceMenu(latestVersion) {
 const MAX_RESTARTS = 2;
 const RESTART_RESET_MS = 30000; // Reset counter if alive > 30s
 
-function startServer(latestVersion) {
+async function startServer(latestVersion) {
   const displayHost = host === DEFAULT_HOST ? "localhost" : host;
   const url = `http://${displayHost}:${port}/dashboard`;
   // Surface real network exposure when bound to all interfaces (default 0.0.0.0).
