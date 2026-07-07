@@ -74,6 +74,12 @@ export default function APIPageClient({ machineId }) {
   const [tunnelEverReachable, setTunnelEverReachable] = useState(false);
   const [tsEverReachable, setTsEverReachable] = useState(false);
 
+  // Local proxy toggles
+  const [lmstudioEnabled, setLmstudioEnabled] = useState(false);
+  const [llamacppEnabled, setLlamacppEnabled] = useState(false);
+  const [lmstudioLoading, setLmstudioLoading] = useState(false);
+  const [llamacppLoading, setLlamacppLoading] = useState(false);
+
   // API key visibility toggle state
   const [visibleKeys, setVisibleKeys] = useState(new Set());
 
@@ -204,6 +210,8 @@ export default function APIPageClient({ machineId }) {
         setRequireLogin(data.requireLogin !== false);
         setHasPassword(data.hasPassword || false);
         setTunnelDashboardAccess(data.tunnelDashboardAccess || false);
+        setLmstudioEnabled(data.lmstudioProxyEnabled || false);
+        setLlamacppEnabled(data.llamacppProxyEnabled || false);
       }
       if (statusRes.ok) {
         const data = await statusRes.json();
@@ -236,7 +244,29 @@ export default function APIPageClient({ machineId }) {
       });
       if (res.ok) setTunnelDashboardAccess(value);
     } catch (error) {
-      console.log("Error updating tunnelDashboardAccess:", error);
+      console.log("Error updating tunnel dashboard access:", error);
+    }
+  };
+
+  const handleLocalProxyToggle = async (service) => {
+    const isEnabled = service === "lmstudio" ? lmstudioEnabled : llamacppEnabled;
+    const setLoading = service === "lmstudio" ? setLmstudioLoading : setLlamacppLoading;
+    const setEnabled = service === "lmstudio" ? setLmstudioEnabled : setLlamacppEnabled;
+
+    setLoading(true);
+    try {
+      const res = await fetch("/api/local-proxies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: isEnabled ? "stop" : "start", service }),
+      });
+      if (res.ok) {
+        setEnabled(!isEnabled);
+      }
+    } catch (error) {
+      console.log(`Error toggling ${service} proxy:`, error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -720,6 +750,28 @@ export default function APIPageClient({ machineId }) {
             copied={copied}
             onCopy={copy}
           />
+          {/* llama.cpp — local proxy on port 8080 */}
+          <EndpointRow
+            label="llama.cpp"
+            url={`http://127.0.0.1:8080/v1`}
+            copyId="llamacpp_url"
+            copied={copied}
+            onCopy={copy}
+            actions={
+              <Toggle checked={llamacppEnabled} onChange={() => handleLocalProxyToggle("llamacpp")} disabled={llamacppLoading} />
+            }
+          />
+          {/* LM Studio — local proxy on port 1234 */}
+          <EndpointRow
+            label="LM Studio"
+            url={`http://127.0.0.1:1234/v1`}
+            copyId="lmstudio_url"
+            copied={copied}
+            onCopy={copy}
+            actions={
+              <Toggle checked={lmstudioEnabled} onChange={() => handleLocalProxyToggle("lmstudio")} disabled={lmstudioLoading} />
+            }
+          />
           {/* Cloudflare Tunnel */}
           <div className="flex items-center gap-2">
             <span className={`text-xs font-mono px-1.5 py-0.5 rounded shrink-0 min-w-[88px] text-center ${
@@ -933,19 +985,19 @@ export default function APIPageClient({ machineId }) {
           </div>
         )}
 
-        {/* Tunnel dashboard access option */}
-        {(tunnelEnabled || tsEnabled) && (
-          <div className="mt-4 pt-4 border-t border-border flex items-center gap-3">
-            <Toggle
-              checked={tunnelDashboardAccess}
-              onChange={() => handleTunnelDashboardAccess(!tunnelDashboardAccess)}
-            />
-            <div className="flex items-center gap-1.5">
-              <p className="font-medium text-sm">Allow dashboard access via tunnel</p>
-              <Tooltip text="When enabled, the dashboard can be accessed through your tunnel or Tailscale URL (login still required). When disabled, dashboard access via tunnel/Tailscale is completely blocked." />
-            </div>
+      {/* Tunnel dashboard access option */}
+      {(tunnelEnabled || tsEnabled) && (
+        <div className="mt-4 pt-4 border-t border-border flex items-center gap-3">
+          <Toggle
+            checked={tunnelDashboardAccess}
+            onChange={() => handleTunnelDashboardAccess(!tunnelDashboardAccess)}
+          />
+          <div className="flex items-center gap-1.5">
+            <p className="font-medium text-sm">Allow dashboard access via tunnel</p>
+            <Tooltip text="When enabled, the dashboard can be accessed through your tunnel or Tailscale URL (login still required). When disabled, dashboard access via tunnel/Tailscale is completely blocked." />
           </div>
-        )}
+        </div>
+      )}
       </Card>
 
       {/* API Keys */}

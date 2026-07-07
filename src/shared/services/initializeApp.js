@@ -16,6 +16,7 @@ import {
 import { getMitmStatus, startMitm, loadEncryptedPassword, initDbHooks, restoreToolDNS, removeAllDNSEntriesSync } from "@/mitm/manager";
 import { startQuotaAutoPing } from "@/shared/services/quotaAutoPing";
 import { syncToJson as syncMitmAliasCache } from "@/lib/mitmAliasCache";
+import { startProxy } from "@/lib/localProxies";
 
 // Inject correct paths and DB hooks into manager.js (CJS) from ESM context
 (function bootstrapMitm() {
@@ -89,6 +90,7 @@ export async function initializeApp() {
     startWatchdog();
     startNetworkMonitor();
     autoStartMitm();
+    autoStartLocalProxies();
     startQuotaAutoPing();
   } catch (error) {
     console.error("[InitApp] Error:", error);
@@ -126,6 +128,27 @@ async function autoStartMitm() {
     console.log("[InitApp] MITM auto-start failed:", err.message);
   } finally {
     g.mitmStartInProgress = false;
+  }
+}
+
+async function autoStartLocalProxies() {
+  try {
+    const settings = await getSettings();
+    const keys = await getApiKeys();
+    const activeKey = keys.find(k => k.isActive !== false);
+    const apiKey = activeKey?.key || "sk_9router";
+    const routerPort = parseInt(process.env.PORT || "20128", 10);
+
+    if (settings.lmstudioProxyEnabled) {
+      startProxy(1234, routerPort, apiKey);
+      console.log("[InitApp] LM Studio proxy auto-started on port 1234");
+    }
+    if (settings.llamacppProxyEnabled) {
+      startProxy(8080, routerPort, apiKey);
+      console.log("[InitApp] llama.cpp proxy auto-started on port 8080");
+    }
+  } catch (err) {
+    console.log("[InitApp] Local proxy auto-start failed:", err.message);
   }
 }
 
