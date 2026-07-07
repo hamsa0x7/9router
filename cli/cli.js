@@ -573,8 +573,28 @@ if (!fs.existsSync(serverPath)) {
   process.exit(1);
 }
 
-// Check for updates FIRST, then start server
-checkForUpdate().then((latestVersion) => {
+// Check for updates FIRST, auto-install, then start server
+checkForUpdate().then(async (latestVersion) => {
+  if (latestVersion) {
+    console.log(`\n⬆  Update available: v${pkg.version} → v${latestVersion}\n`);
+    console.log("⏳ Auto-installing (npm i -g)...\n");
+    try {
+      await autoUpdate(latestVersion);
+      console.log("\n🔄 Update complete. Restarting...");
+      const restarted = spawn(process.execPath, [__filename, "--skip-update", ...process.argv.slice(2)], {
+        detached: true,
+        stdio: "inherit",
+        windowsHide: true,
+        env: { ...process.env }
+      });
+      restarted.unref();
+      process.exit(0);
+      return;
+    } catch (err) {
+      console.log(`\x1b[33m✗ Auto-update failed. Starting with current version.\x1b[0m\n`);
+    }
+  }
+
   killAllAppProcesses(port).then(() => {
     return killProcessOnPort(port);
   }).then(() => {
