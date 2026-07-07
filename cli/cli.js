@@ -60,6 +60,10 @@ const APP_NAME = pkg.name; // Use from package.json
 const GITHUB_REPO = "hamsa0x7/9router";
 const INSTALL_CMD_LATEST = `npm i -g github:${GITHUB_REPO}#master`;
 
+function getLatestReleaseAssetUrl(version) {
+  return `https://github.com/${GITHUB_REPO}/releases/download/v${version}/9router-${version}.tgz`;
+}
+
 const DEFAULT_PORT = 20128;
 const DEFAULT_HOST = "0.0.0.0";
 const MAX_PORT_ATTEMPTS = 10;
@@ -507,6 +511,24 @@ function checkForUpdate() {
   });
 }
 
+// Auto-install update from GitHub release
+async function autoUpdate(version) {
+  const assetUrl = getLatestReleaseAssetUrl(version);
+  const spinner = createSpinner(`Updating to v${version}...`).start();
+  return new Promise((resolve, reject) => {
+    exec(`npm install -g "${assetUrl}"`, { windowsHide: true, timeout: 60000 }, (err, stdout, stderr) => {
+      spinner.stop();
+      if (err) {
+        console.error(`\x1b[31m✗ Update failed: ${stderr || err.message}\x1b[0m`);
+        reject(err);
+      } else {
+        console.log(`\x1b[32m✓ Updated to v${version}\x1b[0m`);
+        resolve();
+      }
+    });
+  });
+}
+
 // Open browser
 function openBrowser(url) {
   const platform = process.platform;
@@ -740,6 +762,31 @@ function startServer(latestVersion) {
     process.removeAllListeners("SIGHUP");
     process.on("SIGHUP", () => {});
 
+    // Auto-update in tray mode: kill old server, update, restart
+    if (latestVersion) {
+      console.log(`\n🚀 ${pkg.name} v${pkg.version}`);
+      console.log(`\n⬆  Update available: v${latestVersion} → auto-installing...\n`);
+      cleanup();
+      try {
+        await autoUpdate(latestVersion);
+        console.log("\n🔄 Restarting...");
+        const restarted = spawn(process.execPath, [
+          __filename, "--tray", "--skip-update", "-p", port.toString()
+        ], {
+          detached: true,
+          stdio: "ignore",
+          windowsHide: true,
+          env: { ...process.env }
+        });
+        restarted.unref();
+        process.exit(0);
+        return;
+      } catch (err) {
+        console.log(`\x1b[33m✗ Auto-update failed: ${err.message}\x1b[0m`);
+        console.log(`   Manual: ${INSTALL_CMD_LATEST}\n`);
+      }
+    }
+
     console.log(`\n🚀 ${pkg.name} v${pkg.version}`);
     console.log(`Server: http://${displayHost}:${port}`);
 
@@ -773,12 +820,15 @@ function startServer(latestVersion) {
           const { clearScreen } = require("./src/cli/utils/display");
           clearScreen();
           console.log(`\n⬆  Update v${pkg.version} → v${latestVersion}\n`);
-          console.log(`Run this after exit:\n`);
-          console.log(`   \x1b[33m${INSTALL_CMD_LATEST}\x1b[0m\n`);
           cleanup();
           await killAllAppProcesses(port);
           await killProcessOnPort(port);
-          setTimeout(() => process.exit(0), 200);
+          try {
+            await autoUpdate(latestVersion);
+          } catch {
+            console.log(`\n\x1b[33mManual: ${INSTALL_CMD_LATEST}\x1b[0m\n`);
+          }
+          process.exit(0);
           return;
         } else if (choice === "web") {
           openBrowser(url);
