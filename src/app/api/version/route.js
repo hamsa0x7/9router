@@ -1,20 +1,30 @@
 import https from "https";
 import pkg from "../../../../package.json" with { type: "json" };
 
-const NPM_PACKAGE_NAME = "9router";
+const GITHUB_REPO = "hamsa0x7/9router";
 
-// Fetch latest version from npm registry
+// Fetch latest version from GitHub releases
 function fetchLatestVersion() {
   return new Promise((resolve) => {
     const req = https.get(
-      `https://registry.npmjs.org/${NPM_PACKAGE_NAME}/latest`,
-      { timeout: 4000 },
+      {
+        hostname: "api.github.com",
+        path: `/repos/${GITHUB_REPO}/releases/latest`,
+        headers: { "User-Agent": "9router" },
+        timeout: 4000,
+      },
       (res) => {
         let data = "";
         res.on("data", (chunk) => (data += chunk));
         res.on("end", () => {
           try {
-            resolve(JSON.parse(data).version || null);
+            const release = JSON.parse(data);
+            const tag = release.tag_name;
+            if (tag && tag.startsWith("v")) {
+              resolve(tag.slice(1));
+            } else {
+              resolve(null);
+            }
           } catch {
             resolve(null);
           }

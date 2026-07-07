@@ -9,15 +9,15 @@ export const APP_CONFIG = {
 
 // GitHub configuration
 export const GITHUB_CONFIG = {
-  changelogUrl: "https://raw.githubusercontent.com/decolua/9router/refs/heads/master/CHANGELOG.md",
+  changelogUrl: "https://raw.githubusercontent.com/hamsa0x7/9router/refs/heads/master/CHANGELOG.md",
   donateUrl: "https://9router.com/api/donate",
 };
 
 // Updater configuration
 export const UPDATER_CONFIG = {
   npmPackageName: "9router",
-  installCmd: "npm i -g 9router",
-  installCmdLatest: "npm i -g 9router@latest --prefer-online",
+  installCmd: "npm i -g github:hamsa0x7/9router#master",
+  installCmdLatest: "npm i -g github:hamsa0x7/9router#master",
   shutdownCountdownSec: 3,
   exitDelayMs: 500,
   statusPort: 20129,

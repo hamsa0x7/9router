@@ -27,13 +27,13 @@ function applyAuth(headers, desc, credentials) {
   if (desc.combined) {
     // combined providers always set the header (legacy behavior, incl. noAuth → "Bearer undefined")
     setAuth(headers, desc, credentials.apiKey || credentials.accessToken);
-    if (desc.anthropicVersion && !headers["anthropic-version"]) headers["anthropic-version"] = ANTHROPIC_API_VERSION;
+    if (desc.anthropicVersion && !headers["anthropic-version"] && !headers["Anthropic-Version"]) headers["anthropic-version"] = ANTHROPIC_API_VERSION;
     return;
   }
   // split apiKey/oauth: set only the matching branch (legacy: anthropic-compatible skips when both absent)
   if (credentials.apiKey) setAuth(headers, desc.apiKey, credentials.apiKey);
   else if (credentials.accessToken) setAuth(headers, desc.oauth, credentials.accessToken);
-  if (desc.anthropicVersion && !headers["anthropic-version"]) headers["anthropic-version"] = ANTHROPIC_API_VERSION;
+  if (desc.anthropicVersion && !headers["anthropic-version"] && !headers["Anthropic-Version"]) headers["anthropic-version"] = ANTHROPIC_API_VERSION;
 }
 
 // Provider-specific header quirks kept as small hooks (not pure auth).

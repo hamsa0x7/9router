@@ -55,7 +55,7 @@ export class BaseExecutor {
       } else if (credentials.accessToken) {
         headers["Authorization"] = `Bearer ${credentials.accessToken}`;
       }
-      if (!headers["anthropic-version"]) {
+      if (!headers["anthropic-version"] && !headers["Anthropic-Version"]) {
         headers["anthropic-version"] = ANTHROPIC_API_VERSION;
       }
     } else {

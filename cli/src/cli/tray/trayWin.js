@@ -6,6 +6,12 @@ const readline = require("readline");
 
 let psProcess = null;
 let clickHandler = null;
+let doubleClickHandler = null;
+let trayKilled = false;
+let trayRestartAttempts = 0;
+let lastTrayCrashTime = 0;
+const MAX_TRAY_RESTARTS = 3;
+const TRAY_RESTART_RESET_MS = 300000; // 5 minutes
 
 /**
  * Send JSON command to PowerShell tray process via stdin
@@ -18,13 +24,15 @@ function sendCommand(cmd) {
 
 /**
  * Initialize Windows tray using PowerShell NotifyIcon
- * @param {Object} options - { iconPath, tooltip, items, onClick }
+ * @param {Object} options - { iconPath, tooltip, items, onClick, onDoubleClick }
  *   items: [{ title, enabled }]
  * @returns {Object|null} controller with sendAction/kill
  */
 function initWinTray(options) {
-  const { iconPath, tooltip, items, onClick } = options;
+  const { iconPath, tooltip, items, onClick, onDoubleClick } = options;
+  trayKilled = false;
   clickHandler = onClick;
+  doubleClickHandler = onDoubleClick;
 
   const scriptPath = path.join(__dirname, "tray.ps1");
 
@@ -53,12 +61,34 @@ function initWinTray(options) {
       const evt = JSON.parse(line);
       if (evt.type === "click" && clickHandler) {
         clickHandler(evt.index);
+      } else if (evt.type === "doubleclick" && doubleClickHandler) {
+        doubleClickHandler();
       }
     } catch (e) {}
   });
 
   psProcess.on("error", () => {});
   psProcess.stderr.on("data", () => {});
+
+  // Detect unexpected tray process death and attempt restart
+  psProcess.on("exit", (code) => {
+    psProcess = null;
+
+    // Reset counter if last crash was long ago
+    const now = Date.now();
+    if (now - lastTrayCrashTime > TRAY_RESTART_RESET_MS) trayRestartAttempts = 0;
+    lastTrayCrashTime = now;
+
+    if (!trayKilled && trayRestartAttempts < MAX_TRAY_RESTARTS) {
+      trayRestartAttempts++;
+      console.error(`[9router] tray exited unexpectedly (code: ${code}), restarting (${trayRestartAttempts}/${MAX_TRAY_RESTARTS})...`);
+      setTimeout(() => {
+        if (!psProcess) {
+          try { initWinTray(options); } catch (e) { }
+        }
+      }, 3000);
+    }
+  });
 
   // Send initial menu items
   items.forEach((item, index) => {
@@ -73,6 +103,7 @@ function initWinTray(options) {
       sendCommand({ action: "set-tooltip", text });
     },
     kill() {
+      trayKilled = true;
       try {
         sendCommand({ action: "kill" });
       } catch (e) {}

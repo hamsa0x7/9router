@@ -73,6 +73,10 @@ scripts/agSniffer/*
 gitbooks/*
 gitbook/README.md
 
+# AI tools
+.claude/
+.codewhale/
+
 # Refactor backup reference (do not bundle/lint)
 open-sse.old/
 .graphifyignore

@@ -57,25 +57,11 @@ try { ensureTrayRuntime({ silent: true }); } catch {}
 
 // Configuration constants
 const APP_NAME = pkg.name; // Use from package.json
-const INSTALL_CMD_LATEST = `npm i -g ${APP_NAME}@latest --prefer-online`;
+const GITHUB_REPO = "hamsa0x7/9router";
+const INSTALL_CMD_LATEST = `npm i -g github:${GITHUB_REPO}#master`;
 
 const DEFAULT_PORT = 20128;
 const DEFAULT_HOST = "0.0.0.0";
-
-// First non-internal IPv4 — the address remote peers actually reach when bound to 0.0.0.0.
-function getLanIp() {
-  for (const ifaces of Object.values(os.networkInterfaces())) {
-    for (const i of ifaces || []) {
-      if (i.family === "IPv4" && !i.internal) return i.address;
-    }
-  }
-  return null;
-}
-
-// Local URL stays "localhost"; warn separately when bound to all interfaces (network-exposed).
-function getDisplayHost() {
-  return host === DEFAULT_HOST ? "localhost" : host;
-}
 const MAX_PORT_ATTEMPTS = 10;
 // Identifiers for killAllAppProcesses - only kill 9router specifically
 const PROCESS_IDENTIFIERS = [
@@ -88,7 +74,8 @@ let host = DEFAULT_HOST;
 let noBrowser = false;
 let skipUpdate = false;
 let showLog = false;
-let trayMode = false;
+let trayMode = true; // Default: tray mode (start + dashboard + tray)
+let menuMode = false; // Explicit --menu flag to get old interactive menu
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--port" || args[i] === "-p") {
@@ -106,6 +93,9 @@ for (let i = 0; i < args.length; i++) {
   } else if (args[i] === "--tray" || args[i] === "-t") {
     trayMode = true;
     process.env.TRAY_MODE = "1";
+  } else if (args[i] === "--menu" || args[i] === "-m") {
+    menuMode = true;
+    trayMode = false;
   } else if (args[i] === "--help" || args[i] === "-h") {
     console.log(`
 Usage: ${APP_NAME} [options]
@@ -115,10 +105,12 @@ Options:
   -H, --host <host>   Host to bind (default: ${DEFAULT_HOST})
   -n, --no-browser    Don't open browser automatically
   -l, --log           Show server logs (default: hidden)
-  -t, --tray          Run in system tray mode (background)
+  -m, --menu          Show interactive menu (legacy mode)
   --skip-update       Skip auto-update check
   -h, --help          Show this help message
   -v, --version       Show version
+
+Default behavior: start server, open dashboard, minimize to tray.
 `);
     process.exit(0);
   } else if (args[i] === "--version" || args[i] === "-v") {
@@ -131,6 +123,31 @@ Options:
 if (skipUpdate && !trayMode && !process.stdin.isTTY) {
   trayMode = true;
   process.env.TRAY_MODE = "1";
+}
+
+// Windows early detach: if we're in a terminal (TTY) and tray mode is on,
+// immediately spawn a detached background process and exit. This way the
+// terminal closes in <1s and only the background process does the real work
+// (update check, kill old instances, start server, tray icon). Without this,
+// closing the terminal window force-kills everything in its console group.
+if (trayMode && process.platform === "win32" && process.stdout && process.stdout.isTTY && !process.env.IS_DETACHED) {
+  const bgArgs = [__filename];
+  const origArgs = process.argv.slice(2);
+  if (!origArgs.includes("--tray") && !origArgs.includes("-t")) bgArgs.push("--tray");
+  bgArgs.push(...origArgs);
+
+  const bgProcess = spawn(process.execPath, bgArgs, {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+    env: { ...process.env, IS_DETACHED: "1" }
+  });
+  bgProcess.unref();
+
+  console.log(`\n🚀 9Router starting in background (PID: ${bgProcess.pid})`);
+  console.log(`   Server will be at: http://localhost:${port}`);
+  console.log(`\n💡 You can close this terminal. Right-click tray icon to quit.\n`);
+  process.exit(0);
 }
 
 // Always use Node.js runtime with absolute path
@@ -185,7 +202,7 @@ function killCloudflaredByAppPort(appPort) {
   const pids = [];
   try {
     if (process.platform === "win32") {
-      const psCmd = `powershell -NonInteractive -WindowStyle Hidden -Command "Get-WmiObject Win32_Process -Filter 'Name=\\"cloudflared.exe\\"' | Select-Object ProcessId,CommandLine | ConvertTo-Csv -NoTypeInformation"`;
+      const psCmd = `powershell -NonInteractive -WindowStyle Hidden -Command "Get-CimInstance Win32_Process -Filter 'Name=\\"cloudflared.exe\\"' | Select-Object ProcessId,CommandLine | ConvertTo-Csv -NoTypeInformation"`;
       const output = execSync(psCmd, { encoding: "utf8", windowsHide: true, timeout: 5000 });
       const lines = output.split("\n").slice(1).filter(l => l.trim());
       lines.forEach(line => {
@@ -224,9 +241,9 @@ function killAllAppProcesses(appPort) {
       pids.push(...killCloudflaredByAppPort(appPort));
 
       if (platform === "win32") {
-        // Windows: use WMI to get full CommandLine (tasklist /V doesn't include it)
+        // Windows: use CIM to get full CommandLine
         try {
-          const psCmd = `powershell -NonInteractive -WindowStyle Hidden -Command "Get-WmiObject Win32_Process -Filter 'Name=\\"node.exe\\"' | Select-Object ProcessId,CommandLine | ConvertTo-Csv -NoTypeInformation"`;
+          const psCmd = `powershell -NonInteractive -WindowStyle Hidden -Command "Get-CimInstance Win32_Process -Filter 'Name=\\"node.exe\\"' | Select-Object ProcessId,CommandLine | ConvertTo-Csv -NoTypeInformation"`;
           const output = execSync(psCmd, {
             encoding: "utf8",
             windowsHide: true,
@@ -234,8 +251,6 @@ function killAllAppProcesses(appPort) {
           });
           const lines = output.split("\n").slice(1).filter(l => l.trim());
           lines.forEach(line => {
-            // Whitelist: real node process running 9router/cli.js, or next-server.
-            // Avoids killing editors/grep/strace/cursor that just have "9router" in cmdline.
             const cmd = line.toLowerCase();
             const isAppProcess =
               (cmd.includes("node") && cmd.includes("9router") && (cmd.includes("cli.js") || cmd.includes("\\9router") || cmd.includes("/9router")))
@@ -260,8 +275,6 @@ function killAllAppProcesses(appPort) {
           const lines = output.split('\n');
 
           lines.forEach(line => {
-            // Whitelist: real node process running 9router/cli.js, or next-server.
-            // Avoids killing grep/strace/editors/cursor that incidentally match "9router".
             const cmd = line.toLowerCase();
             const isAppProcess =
               (cmd.includes("node") && cmd.includes("9router") && (cmd.includes("cli.js") || cmd.includes("/9router")))
@@ -279,12 +292,25 @@ function killAllAppProcesses(appPort) {
         }
       }
 
-      // Kill all found processes
+      // Kill all found processes.
+      //
+      // SIGSTOP-then-SIGKILL on Unix: if we just walk the list and SIGKILL each
+      // PID in turn, killing the next-server child first lets the parent cli.js's
+      // `server.on("close")` handler fire and run tryRestart() — spawning a new
+      // next-server with a fresh PID that's not in our kill list. The orphan
+      // keeps holding port :20128 and breaks Hide-to-Tray takeover. Freezing
+      // every matched parent first (SIGSTOP) blocks tryRestart from ever
+      // firing, so the subsequent SIGKILL is race-free.
       if (pids.length > 0) {
+        if (platform !== "win32") {
+          pids.forEach(pid => {
+            try { execSync(`kill -STOP ${pid} 2>/dev/null`, { stdio: 'ignore', timeout: 1000 }); } catch { /* already gone */ }
+          });
+        }
         pids.forEach(pid => {
           try {
             if (platform === "win32") {
-              execSync(`taskkill /F /PID ${pid} 2>nul`, { stdio: 'ignore', shell: true, windowsHide: true, timeout: 3000 });
+              execSync(`taskkill /F /PID ${pid} 2>nul`, { stdio: 'ignore', windowsHide: true, timeout: 3000 });
             } else {
               execSync(`kill -9 ${pid} 2>/dev/null`, { stdio: 'ignore', timeout: 3000 });
             }
@@ -363,14 +389,13 @@ function killProcessOnPort(port) {
         try {
           const output = execSync(`netstat -ano | findstr :${port}`, {
             encoding: 'utf8',
-            shell: true,
             windowsHide: true,
             timeout: 5000
           }).trim();
           const lines = output.split('\n').filter(l => l.includes('LISTENING'));
           if (lines.length > 0) {
             pid = lines[0].trim().split(/\s+/).pop();
-            execSync(`taskkill /F /PID ${pid} 2>nul`, { stdio: 'ignore', shell: true, windowsHide: true, timeout: 3000 });
+            execSync(`taskkill /F /PID ${pid} 2>nul`, { stdio: 'ignore', windowsHide: true, timeout: 3000 });
           }
         } catch (e) {
           // Port is free or error
@@ -443,25 +468,42 @@ function checkForUpdate() {
       resolve(version);
     };
 
-    const req = https.get(`https://registry.npmjs.org/${pkg.name}/latest`, { timeout: 3000 }, (res) => {
-      let data = "";
-      res.on("data", chunk => data += chunk);
-      res.on("end", () => {
-        try {
-          const latest = JSON.parse(data);
-          if (latest.version && compareVersions(latest.version, pkg.version) > 0) {
-            done(latest.version);
-          } else {
+    const req = https.get(
+      {
+        hostname: "api.github.com",
+        path: `/repos/${GITHUB_REPO}/releases/latest`,
+        headers: { "User-Agent": "9router-cli" },
+        timeout: 3000,
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk) => (data += chunk));
+        res.on("end", () => {
+          try {
+            const release = JSON.parse(data);
+            const tag = release.tag_name;
+            if (tag && tag.startsWith("v")) {
+              const latestVersion = tag.slice(1);
+              if (compareVersions(latestVersion, pkg.version) > 0) {
+                done(latestVersion);
+              } else {
+                done(null);
+              }
+            } else {
+              done(null);
+            }
+          } catch (e) {
             done(null);
           }
-        } catch (e) {
-          done(null);
-        }
-      });
-    });
+        });
+      }
+    );
 
     req.on("error", () => done(null));
-    req.on("timeout", () => { req.destroy(); done(null); });
+    req.on("timeout", () => {
+      req.destroy();
+      done(null);
+    });
   });
 }
 
@@ -483,6 +525,16 @@ function openBrowser(url) {
       console.log(`Open browser manually: ${url}`);
     }
   });
+}
+
+// First non-internal IPv4 — the address remote peers actually reach when bound to 0.0.0.0.
+function getLanIp() {
+  for (const ifaces of Object.values(os.networkInterfaces())) {
+    for (const i of ifaces || []) {
+      if (i.family === "IPv4" && !i.internal) return i.address;
+    }
+  }
+  return null;
 }
 
 // Find standalone server (bundled in bin/app for published package).
@@ -516,7 +568,7 @@ async function showInterfaceMenu(latestVersion) {
 
   clearScreen();
 
-  const displayHost = getDisplayHost();
+  const displayHost = host === DEFAULT_HOST ? "localhost" : host;
 
   // Detect tunnel/local mode for server URL display
   let serverUrl;
@@ -557,7 +609,7 @@ const MAX_RESTARTS = 2;
 const RESTART_RESET_MS = 30000; // Reset counter if alive > 30s
 
 function startServer(latestVersion) {
-  const displayHost = getDisplayHost();
+  const displayHost = host === DEFAULT_HOST ? "localhost" : host;
   const url = `http://${displayHost}:${port}/dashboard`;
   // Surface real network exposure when bound to all interfaces (default 0.0.0.0).
   if (host === DEFAULT_HOST) {
@@ -612,12 +664,15 @@ function startServer(latestVersion) {
       killProxyByPidFile();
       // Kill cloudflared/tailscale via PID file (only this app's tunnel)
       killTunnelByPidFile();
-      // Kill server process directly
+      // Kill server process (and process tree on Windows)
       if (server.pid) {
-        process.kill(server.pid, "SIGKILL");
+        if (process.platform === "win32") {
+          try { execSync(`taskkill /F /T /PID ${server.pid}`, { stdio: "ignore", windowsHide: true, timeout: 3000 }); } catch (e) { }
+        } else {
+          try { process.kill(-server.pid, "SIGKILL"); } catch (e) { }
+          try { process.kill(server.pid, "SIGKILL"); } catch (e) { }
+        }
       }
-      // Also try to kill process group
-      process.kill(-server.pid, "SIGKILL");
     } catch (e) { }
   }
 
@@ -648,6 +703,15 @@ function startServer(latestVersion) {
     cleanup();
     setTimeout(() => process.exit(0), 100);
   });
+  // Windows: handle console window close (CTRL_CLOSE_EVENT → SIGBREAK)
+  if (process.platform === "win32") {
+    process.on("SIGBREAK", () => {
+      if (isShuttingDown) return;
+      isShuttingDown = true;
+      cleanup();
+      setTimeout(() => process.exit(0), 100);
+    });
+  }
 
   // Initialize tray icon (runs alongside TUI)
   const initTrayIcon = () => {
@@ -668,7 +732,9 @@ function startServer(latestVersion) {
     }
   };
 
-  // Tray-only mode: no TUI, just tray icon
+  // Tray-only mode: no TUI, just tray icon + optional browser open
+  // On Windows, the early-detach block (before update check) already handled
+  // spawning a background process, so we only reach here as the detached instance.
   if (trayMode) {
     // Ignore SIGHUP so macOS terminal close doesn't kill the background tray process
     process.removeAllListeners("SIGHUP");
@@ -677,10 +743,17 @@ function startServer(latestVersion) {
     console.log(`\n🚀 ${pkg.name} v${pkg.version}`);
     console.log(`Server: http://${displayHost}:${port}`);
 
+    // Attach server crash/restart handlers so tray mode recovers from server death
+    attachServerEvents();
+
+    // Keep the Node.js event loop alive — without this, the process silently
+    // exits when all stdio pipes close and no other refs remain.
+    setInterval(() => {}, 60000);
+
     setTimeout(() => {
       initTrayIcon();
-      console.log("\n💡 Router is now running in system tray. Close this terminal if you want.");
-      console.log("   Right-click tray icon to open dashboard or quit.\n");
+      console.log("\n💡 Router is now running in system tray.");
+      console.log("   Double-click tray icon to open dashboard, right-click for menu.\n");
     }, 2000);
 
     return;
@@ -796,15 +869,7 @@ function startServer(latestVersion) {
     if (aliveMs >= RESTART_RESET_MS) restartCount = 0;
 
     if (restartCount >= MAX_RESTARTS) {
-      console.error(`\n⚠️  Server crashed ${MAX_RESTARTS} times. Disabling MIT and restarting...`);
-      try {
-        const dbPath = path.join(os.homedir(), process.platform === "win32" ? path.join("AppData", "Roaming", "9router", "db.json") : path.join(".9router", "db.json"));
-        if (fs.existsSync(dbPath)) {
-          const db = JSON.parse(fs.readFileSync(dbPath, "utf-8"));
-          if (db.settings) db.settings.mitmEnabled = false;
-          fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
-        }
-      } catch { /* best effort */ }
+      console.error(`\n⚠️  Server crashed ${MAX_RESTARTS} times. Resetting counter and restarting...`);
       restartCount = 0;
       server = spawnServer();
       attachServerEvents();

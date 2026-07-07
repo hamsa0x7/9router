@@ -90,8 +90,7 @@ function getAutostartEnabled() {
 function handleClick(index, options, onAutostartToggle) {
   const { onQuit, onOpenDashboard, port } = options;
   if (index === MENU_INDEX.DASHBOARD) {
-    if (onOpenDashboard) onOpenDashboard();
-    else openBrowser(`http://localhost:${port}/dashboard`);
+    openDashboardSmart(port, onOpenDashboard);
   } else if (index === MENU_INDEX.AUTOSTART) {
     const enabled = getAutostartEnabled();
     try {
@@ -112,7 +111,7 @@ function handleClick(index, options, onAutostartToggle) {
  * Windows tray via PowerShell NotifyIcon
  */
 function initWindowsTray(options) {
-  const { port } = options;
+  const { port, onOpenDashboard } = options;
   try {
     const { initWinTray } = require("./trayWin");
     const iconPath = path.join(__dirname, "icon.ico");
@@ -128,6 +127,9 @@ function initWindowsTray(options) {
           const newTitle = newEnabled ? "✓ Auto-start Enabled" : "Enable Auto-start";
           trayInstance.updateItem(MENU_INDEX.AUTOSTART, newTitle, true);
         });
+      },
+      onDoubleClick: () => {
+        openDashboardSmart(port, onOpenDashboard);
       }
     });
 
@@ -314,6 +316,18 @@ function openBrowser(url) {
   }
 
   exec(cmd);
+}
+
+async function openDashboardSmart(port, onOpenDashboard) {
+  const focusUrl = `http://localhost:${port}/api/dashboard/focus`;
+  try {
+    const res = await fetch(focusUrl, { method: "POST", signal: AbortSignal.timeout(5000) });
+    const data = await res.json().catch(() => ({}));
+    if (data.focused && data.clients > 0) return;
+  } catch {}
+
+  if (onOpenDashboard) onOpenDashboard();
+  else openBrowser(`http://localhost:${port}/dashboard`);
 }
 
 module.exports = {
