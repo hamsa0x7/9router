@@ -61,23 +61,23 @@ jobs:
         id: rebase
         continue-on-error: true
         run: |
-          git checkout mods/hamsa-all
+          git checkout mods/overlay
           git rebase master
-          git push --force-with-lease origin mods/hamsa-all
+          git push --force-with-lease origin mods/overlay
 
       - name: Create issue on rebase conflict
         if: steps.check.outputs.changed == 'true' && steps.rebase.outcome == 'failure'
         run: |
           gh issue create \
-            --title "Rebase conflict: mods/hamsa-all needs manual resolution" \
-            --body "Upstream released new commits but rebase of \`mods/hamsa-all\` onto \`master\` failed.
+            --title "Rebase conflict: mods/overlay needs manual resolution" \
+            --body "Upstream released new commits but rebase of \`mods/overlay\` onto \`master\` failed.
 
           Run locally to resolve:
           \`\`\`bash
-          git checkout mods/hamsa-all
+          git checkout mods/overlay
           git rebase master
           # Resolve conflicts, then:
-          git push --force-with-lease origin mods/hamsa-all
+          git push --force-with-lease origin mods/overlay
           \`\`\`
           " || true
 
@@ -117,7 +117,7 @@ jobs:
           gh release create "v${{ steps.pack.outputs.version }}" \
             "${{ steps.pack.outputs.tgz }}" \
             --title "v${{ steps.pack.outputs.version }}" \
-            --notes "Auto-built from upstream sync + mods/hamsa-all rebase.
+            --notes "Auto-built from upstream sync + mods/overlay rebase.
 
           Install:
           \`\`\`bash
@@ -127,4 +127,3 @@ jobs:
             --repo hamsa0x7/9router
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
